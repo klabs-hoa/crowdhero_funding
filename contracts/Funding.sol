@@ -1,28 +1,28 @@
 //SPDX-License-Identifier: MIT
-pragma solidity ^0.7.3;
+pragma solidity ^0.8.1;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract FundFlow {
-  address _owner;               // owner
+  address _owner;
   enum Status { FUG, PRS, FID, PEG, CAL, RED }// Funding, progress, finished, pending, cancel, release 
   struct Phase {
-    uint    duration;         
-    uint256 dateEnd;          // deadline have to upload file
-    uint    widwable;         // amount crypto for creator
+    uint    duration;
+    uint256 dateEnd;
+    uint    widwable;
   }
   struct Project {
     address creator;
-    uint    phNum;            // number phase
-    uint    bakNum;           // number backer funded
-    uint    bakAmt;           // money for each backer
-    uint    deniedMax;        // number backer denied max
-    uint    budget;           // budget = bakNum * bakAmt ( include TAX )
+    uint    phNum;
+    uint    bakNum;
+    uint    bakAmt;
+    uint    deniedMax;
+    uint    budget;
     uint    tax;
   }
   struct Result {
-    bool    pass;             // success or fail
-    string  file;             // save in S3 AWS
+    bool    pass;
+    string  file;
   }
   
   mapping(string  => Project)                     internal _pPro;
@@ -32,19 +32,17 @@ contract FundFlow {
 
   mapping(string  => mapping(uint => address[]))  internal _denied;
   mapping(string  => uint)                        internal _budget;
-  mapping(string  => mapping(address => uint256)) internal _funds;         // backer address => projectId => block date
-  mapping(string  => uint)                        internal _widwable;      // creator can withdraw amount
-  mapping(string  => uint)                        internal _bkAmt;         // amount each banker refundable
-  mapping(string  => mapping(address => uint256)) internal _refunds;       // projectCode => backer address => amount
-  uint                                            internal _getTax;        // get TAX
+  mapping(string  => mapping(address => uint256)) internal _funds;
+  mapping(string  => uint)                        internal _widwable;
+  mapping(string  => uint)                        internal _bkAmt;
+  mapping(string  => mapping(address => uint256)) internal _refunds;
+  uint                                            internal _getTax;
   
   event EAction(string action, string indexed name, string project, address creator, address affector, uint bakNum, uint256 bakAmt, uint256 amount);
   event EFinal(string action, string indexed name, string project, address actor, string nft, uint widwable, uint backAmount);
 
-  function createProject( string memory name_, address creator_, 
-                          uint bakNum_, uint256 bakAmt_, 
-                          uint deniedMax_, uint256 tax_ ,
-                          uint256[] memory duration_, uint256[] memory widwable_ ) public {
+  function createProject( string memory name_, address creator_, uint bakNum_, uint256 bakAmt_, 
+                          uint deniedMax_, uint256 tax_, uint256[] memory duration_, uint256[] memory widwable_ ) public {
     require(deniedMax_        <= bakNum_, "invalid denied number");
     require(duration_.length  > 2, "invalid phase min");
     require(duration_.length  == widwable_.length, "invalid phase length");
@@ -78,35 +76,30 @@ contract FundFlow {
   function _next(string memory name_, string memory file_) private {
     uint phN                              =  _pRes[name_].length;
     require(phN                           <  _pPro[name_].phNum, "invalid phase");
-    require(_pPhs[name_][phN].dateEnd     >= block.timestamp,"invalid phase time"); 
-    require(_pPhs[name_][phN].dateEnd -   _pPhs[name_][phN].duration/2     < block.timestamp,"invalid phase time"); //TODO: check min date 
+    require(_pPhs[name_][phN].dateEnd     >= block.timestamp,"invalid phase end");
     require(_denied[name_][phN].length    <  _pPro[name_].deniedMax, "backers denied");
+    if(bytes(file_).length > 0) {
+        require(_pPhs[name_][phN].dateEnd -   _pPhs[name_][phN].duration/2     < block.timestamp,"invalid phase time");
+    }
+    
     Result memory res;
     res.pass              = true;
     res.file              = file_;
     _pRes[name_].push(res);
-    _widwable[name_]      = _widwable[name_] + _pPhs[name_][phN].widwable;
-    _budget[name_]        = _budget[name_]   - _pPhs[name_][phN].widwable;
-    _pPhs[name_][phN+1].duration = _pPhs[name_][phN+1].duration + (_pPhs[name_][phN].dateEnd - block.timestamp);
+    
+    _widwable[name_]      += _pPhs[name_][phN].widwable;
+    _budget[name_]        -= _pPhs[name_][phN].widwable;
+    _pPhs[name_][phN+1].duration += (_pPhs[name_][phN].dateEnd - block.timestamp);
   }
   
   function kickoff(string memory name_) public { 
     require(_pSta[name_]             == Status.FUG, "invalid status");
     require(_pPro[name_].budget      == _budget[name_], "invalid budget");
     require(_pPro[name_].creator     == msg.sender || _owner  == msg.sender, "invalid actor");
-    
-    Result memory res;
-    res.pass              = true;
-    res.file              = "";
-    _pRes[name_].push(res);
-    uint phN                              =  _pRes[name_].length;
-    _widwable[name_]      = _widwable[name_] + _pPhs[name_][phN].widwable;
-    _budget[name_]        = _budget[name_]   - _pPhs[name_][phN].widwable;
-    _pPhs[name_][phN+1].duration = _pPhs[name_][phN+1].duration + (_pPhs[name_][phN].dateEnd - block.timestamp);
-    
+    _next(name_, "");
     _pSta[name_]                     = Status.PRS;
-    _getTax                          = _getTax + _pPro[name_].tax;
-    _budget[name_]                   = _budget[name_] - _pPro[name_].tax;
+    _getTax                          += _pPro[name_].tax;
+    _budget[name_]                   -= _pPro[name_].tax;
     emit EAction("Kickoff", name_, name_, msg.sender, _pPro[name_].creator, _pPro[name_].tax, _widwable[name_], _budget[name_]);
   }
   
@@ -132,7 +125,7 @@ contract FundFlow {
     res.file              = nft_;
     _pRes[name_].push(res);
     _pSta[name_]          = Status.RED;
-    _widwable[name_]      = _widwable[name_] + _budget[name_];
+    _widwable[name_]      += _budget[name_];
     _budget[name_]        = 0;    
     emit EFinal("Release", name_, name_, msg.sender, nft_, phN, _widwable[name_]);
   }
@@ -177,14 +170,14 @@ contract CrowdFunding is FundFlow {
     require(IERC20(_token).allowance(backer_, address(this)) >= amount_, "need approved");
     IERC20(_token).transferFrom(backer_, address(this), amount_);
     
-    _budget[name_]                     = _budget[name_] + amount_;
+    _budget[name_]                     += amount_;
     _funds[name_][backer_]             = amount_;
     emit EAction("Fund", name_, name_, msg.sender, backer_, amount_, _budget[name_], _pPro[name_].budget);
   }
   
   function deny(string memory name_) public {
     require(_funds[name_][msg.sender] == _pPro[name_].bakAmt, "invalid backer");
-    require(_pSta[name_]              == Status.PRS || _pSta[name_] == Status.FID,"invalid status");
+    require(_pSta[name_]              == Status.PRS || _pSta[name_] == Status.FID, "invalid status");
     require(_pRes[name_].length       >  1, "invalid phase");
     uint phN                          = _pRes[name_].length;
     _denied[name_][phN].push(msg.sender);
@@ -201,18 +194,18 @@ contract CrowdFunding is FundFlow {
     
     _refunds[name_][msg.sender]         =  _bkAmt[name_];
     _bkAmt[name_]                       =  0;
-    _budget[name_]                      =  _budget[name_] - _bkAmt[name_];
-    IERC20(_token).safeTransfer(msg.sender, _refunds[name_][msg.sender]);
+    _budget[name_]                      -= _bkAmt[name_];
+    IERC20(_token).transfer(msg.sender, _refunds[name_][msg.sender]);
     
     emit EAction("Refund", name_, name_, msg.sender, msg.sender, _pRes[name_].length, _widwable[name_], _bkAmt[name_]);
   }
   
   function withdraw(string memory name_) public {
-    require(_pPro[name_].creator   == msg.sender, "invalid creator");
+    require(_pPro[name_].creator    == msg.sender, "invalid creator");
     require(_widwable[name_]        >   0, "invalid widwable");
     uint withdrawed                 = _widwable[name_];
     _widwable[name_]                = 0;
-    IERC20(_token).safeTransfer(msg.sender, withdrawed);
+    IERC20(_token).transfer(msg.sender, withdrawed);
     
     emit EAction("Withdraw", name_, name_, msg.sender, _pPro[name_].creator, _pRes[name_].length, withdrawed, 0);
   }
@@ -220,13 +213,13 @@ contract CrowdFunding is FundFlow {
   function getTax() public owner {
     uint backup = _getTax;
     _getTax     = 0;
-    IERC20(_token).safeTransfer(msg.sender, _getTax);
+    IERC20(_token).transfer(msg.sender, backup);
     emit Own("Tax",msg.sender, backup);
   }
   
   function closeAll() public owner {
     uint bal    = IERC20(_token).balanceOf(address(this));
-    IERC20(_token).safeTransfer(msg.sender, bal);
+    IERC20(_token).transfer(msg.sender, bal);
     emit Own("Close",msg.sender, bal);
   }
   
