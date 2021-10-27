@@ -9,16 +9,16 @@ contract FundFlow {
   struct Phase {
     uint    duration;
     uint256 dateEnd;
-    uint    widwable;
+    uint256 widwable;
   }
   struct Project {
     address creator;
     uint    phNum;
     uint    bakNum;
-    uint    bakAmt;
+    uint256 bakAmt;
     uint    deniedMax;
-    uint    budget;
-    uint    tax;
+    uint256 budget;
+    uint256 tax;
   }
   struct Result {
     bool    pass;
@@ -31,18 +31,29 @@ contract FundFlow {
   mapping(string  => Result[])                    internal _pRes;
 
   mapping(string  => mapping(uint => address[]))  internal _denied;
-  mapping(string  => uint)                        internal _budget;
+  mapping(string  => uint256)                     internal _budget;
   mapping(string  => mapping(address => uint256)) internal _funds;
-  mapping(string  => uint)                        internal _widwable;
-  mapping(string  => uint)                        internal _bkAmt;
+  mapping(string  => uint256)                     internal _widwable;
+  mapping(string  => uint256)                     internal _bkAmt;
   mapping(string  => mapping(address => uint256)) internal _refunds;
-  uint                                            internal _getTax;
+  uint256                                         internal _getTax;
   
-  event EAction(string action, string indexed name, string project, address creator, address affector, uint bakNum, uint256 bakAmt, uint256 amount);
-  event EFinal(string action, string indexed name, string project, address actor, string nft, uint widwable, uint backAmount);
+  event EAction(string action, string indexed name, string project, address creator, address affector, uint256 bakNum, uint256 bakAmt, uint256 amount);
+  event EFinal(string action, string indexed name, string project, address actor, string nft, uint256 widwable, uint256 backAmount);
 
+  constructor() 
+  {
+    _owner  = msg.sender;
+    _getTax = 0;
+  }
+  
+  modifier owner(){
+    require(_owner  == msg.sender, "invalid owner");
+    _;
+  }
+  
   function createProject( string memory name_, address creator_, uint bakNum_, uint256 bakAmt_, 
-                          uint deniedMax_, uint256 tax_, uint256[] memory duration_, uint256[] memory widwable_ ) public {
+                          uint deniedMax_, uint256 tax_, uint256[] memory duration_, uint256[] memory widwable_ ) public owner {
     require(deniedMax_        <= bakNum_, "invalid denied number");
     require(duration_.length  > 2, "invalid phase min");
     require(duration_.length  == widwable_.length, "invalid phase length");
@@ -147,20 +158,9 @@ contract CrowdFunding is FundFlow {
   
   address public _token;
   
-  event Own(string action, address creator, uint tax);
+  event Own(string action, address creator, uint256 tax);
   
-  constructor() 
-  {
-    _owner  = msg.sender;
-    _getTax = 0;
-  }
-  
-  modifier owner(){
-    require(_owner  == msg.sender, "invalid owner");
-    _;
-  }
-  
-  function fund(string memory name_, address backer_, uint amount_) public {
+  function fund(string memory name_, address backer_, uint256 amount_) public {
     require(_pSta[name_]               == Status.FUG, "invalid status");
     require(_pPhs[name_][0].dateEnd    >= block.timestamp, "invalid funding time");
     require(_pPro[name_].budget        >  _budget[name_], "enough budget");
@@ -203,7 +203,7 @@ contract CrowdFunding is FundFlow {
   function withdraw(string memory name_) public {
     require(_pPro[name_].creator    == msg.sender, "invalid creator");
     require(_widwable[name_]        >   0, "invalid widwable");
-    uint withdrawed                 = _widwable[name_];
+    uint256 withdrawed              = _widwable[name_];
     _widwable[name_]                = 0;
     IERC20(_token).transfer(msg.sender, withdrawed);
     
@@ -211,14 +211,14 @@ contract CrowdFunding is FundFlow {
   }
   
   function getTax() public owner {
-    uint backup = _getTax;
-    _getTax     = 0;
+    uint256 backup = _getTax;
+    _getTax        = 0;
     IERC20(_token).transfer(msg.sender, backup);
     emit Own("Tax",msg.sender, backup);
   }
   
   function closeAll() public owner {
-    uint bal    = IERC20(_token).balanceOf(address(this));
+    uint256 bal    = IERC20(_token).balanceOf(address(this));
     IERC20(_token).transfer(msg.sender, bal);
     emit Own("Close",msg.sender, bal);
   }
@@ -256,5 +256,4 @@ contract CrowdView is CrowdFunding {
       require(_pPro[name_].creator   == creator_, "invalid creator");
       return _widwable[name_];
   }
-
 }
