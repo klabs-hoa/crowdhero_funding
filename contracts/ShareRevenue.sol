@@ -31,14 +31,14 @@ contract ShareReward {
     
     struct Reward {
         address transaction;// refer
-        uint    date;
+        uint    dayNum;
         uint256 fiat;
         uint256 CRWD;
         uint    perRatio;
         uint    percent;
     }
     
-    mapping(address => mapping(uint => uint[] ))        public  memDeposits;  // address   => packageId    => depositId[]
+    mapping(address => mapping(uint => uint[] ))        public  memDeposits;   // address   => packageId    => depositId[]
     mapping(uint    => History[])                       public  histories;     // depositId   => history
     Deposit[]                                           public  deposits;      
     
@@ -172,10 +172,10 @@ contract ShareReward {
         }
     }
     
-    function addReward(address transaction_, uint date_, uint256 fiat_, uint256 CRWD_, uint perRatio_, uint percent_) external {
+    function addReward(address transaction_, uint dayNum_, uint256 fiat_, uint256 CRWD_, uint perRatio_, uint percent_) external {
         Reward memory vReward;
         vReward.transaction      = transaction_;
-        vReward.date             = date_;
+        vReward.dayNum           = dayNum_;
         vReward.fiat             = fiat_;
         vReward.CRWD             = CRWD_;
         vReward.perRatio         = perRatio_;
@@ -186,13 +186,19 @@ contract ShareReward {
     }
     
     function payRewardPack(uint packId_, uint rewardId_) public {
-        uint vDepositId;
-        uint vPerRatio   =   rewards[rewardId_].perRatio;
-        uint vPercent    =   rewards[rewardId_].percent;
+        uint    vDepositId;
         
+        uint256 vReward;
         for(uint vI=0; vI < packDeposits[packId_].length; vI++) {
-            _payDeposit(packDeposits[packId_][vI], (deposits[vDepositId].mCurrent * vPerRatio) / vPercent);
+            if( deposits[vDepositId].mCurrent == 0 ) continue; 
+            vDepositId      =   packDeposits[packId_][vI];
+            vReward         =   (deposits[vDepositId].mCurrent * ratios[packId_] * (rewards[rewardId_].dayNum + 1 - deposits[vDepositId].dayNum) * rewards[rewardId_].perRatio) / rewards[rewardId_].percent;
+            _payDeposit(vDepositId, vReward);
         }
+    }
+    
+    function calRewardDeposit(uint depositId_, uint rewardId_) public view returns(uint256) {
+        return  (deposits[depositId_].mCurrent * ratios[deposits[depositId_].pack] * (rewards[rewardId_].dayNum + 1 - deposits[depositId_].dayNum) * rewards[rewardId_].perRatio) / rewards[rewardId_].percent;
     }
     
     function payRewardDeposits(uint[] memory depositIds_, uint256[] memory rewards_) external {
@@ -226,5 +232,5 @@ contract ShareReward {
             
             _addHistory(deposits[depositId_].depositer, depositId_, vExValue, "payReward", deposits[depositId_].mCurrent);
         }
-    }       
+    } 
 }
