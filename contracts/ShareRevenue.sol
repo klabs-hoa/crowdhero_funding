@@ -153,6 +153,25 @@ contract ShareReward {
     }
     
     ////////////////////// owner 
+    
+    function calSumAllRatio(uint dayNum_) public view returns ( uint256 vSum ) {
+        uint                vJ;
+        uint256             vSumpack;
+        dayNum_++;    
+        for(uint vI=1; vI < 25; vI++) {
+            if(ratios[vI] > 0) {
+                vSumpack    = 0;
+                for(vJ =1; vJ < dayNum_; vJ++ ) {
+                    if(sumPackDays[vI][vJ] > 0) {
+                        vSumpack       +=  sumPackDays[vI][vJ] * (dayNum_ - vJ);
+                    }
+                }
+                vSumpack        =    vSumpack * ratios[vI];
+                vSum            +=   vSumpack;
+            }
+        }
+    }
+    
     function addReward(address transaction_, uint date_, uint256 fiat_, uint256 CRWD_, uint perRatio_, uint percent_) external {
         Reward memory vReward;
         vReward.transaction      = transaction_;
@@ -166,38 +185,46 @@ contract ShareReward {
         emit Bonus(rewards.length, fiat_, CRWD_, perRatio_);
     }
     
-    function payRewardDeposits(uint[] memory depositIds_, uint256[] memory rewards_) external {
-        uint                vIndex;
-        uint256             vExValue;
-
-        for( uint vI=0; vI< depositIds_.length; vI++) {
-            vIndex                          =    depositIds_[vI]; 
- 
-            deposits[vIndex].mReward        +=   rewards_[vI];
-            deposits[vIndex].mCount         +=   1;
-            
-            sumPackDays[deposits[vIndex].pack][deposits[vIndex].dayNum]     -=   deposits[vIndex].mCurrent;
-            sumPackDays[deposits[vIndex].pack][1]                           +=   deposits[vIndex].mCurrent;
-            deposits[vIndex].dayNum         =    1;
-            
-            if(deposits[vIndex].mCount      ==   deposits[vIndex].pack) {
-                
-                vExValue                    =    deposits[vIndex].mCurrent;
-                deposits[vIndex].mCurrent   +=   deposits[vIndex].mReward;
-                
-                sumPackDays[deposits[vIndex].pack][1]                           +=   deposits[vIndex].mReward;
-                sumAll                                                          +=   deposits[vIndex].mReward;
-                
-                deposits[vIndex].mReward    =    0;
-                deposits[vIndex].mCount     =    0;
-                
-                _addHistory(deposits[vIndex].depositer, vIndex, vExValue, "payReward", deposits[vIndex].mCurrent);
-                
-            }
+    function payRewardPack(uint packId_, uint rewardId_) public {
+        uint vDepositId;
+        uint vPerRatio   =   rewards[rewardId_].perRatio;
+        uint vPercent    =   rewards[rewardId_].percent;
+        
+        for(uint vI=0; vI < packDeposits[packId_].length; vI++) {
+            _payDeposit(packDeposits[packId_][vI], (deposits[vDepositId].mCurrent * vPerRatio) / vPercent);
         }
     }
     
-    function test (uint256 tu, uint256 mau) public pure returns(uint256) {
-        return tu/mau;
+    function payRewardDeposits(uint[] memory depositIds_, uint256[] memory rewards_) external {
+        
+        for( uint vI=0; vI< depositIds_.length; vI++) {
+            _payDeposit(depositIds_[vI], rewards_[vI]);
+        }
     }
+    
+    function _payDeposit(uint depositId_, uint256 amount_) private {
+        
+        if(deposits[depositId_].mCurrent == 0) return;
+        
+        deposits[depositId_].mReward        +=   amount_;
+        deposits[depositId_].mCount         +=   1;
+        
+        sumPackDays[deposits[depositId_].pack][deposits[depositId_].dayNum]     -=   deposits[depositId_].mCurrent;
+        sumPackDays[deposits[depositId_].pack][1]                               +=   deposits[depositId_].mCurrent;
+        deposits[depositId_].dayNum         =    1;
+        
+        if(deposits[depositId_].mCount      ==   deposits[depositId_].pack) {
+            
+            uint256 vExValue                =    deposits[depositId_].mCurrent;
+            deposits[depositId_].mCurrent   +=   deposits[depositId_].mReward;
+            
+            sumPackDays[deposits[depositId_].pack][1]                           +=   deposits[depositId_].mReward;
+            sumAll                                                              +=   deposits[depositId_].mReward;
+            
+            deposits[depositId_].mReward    =    0;
+            deposits[depositId_].mCount     =    0;
+            
+            _addHistory(deposits[depositId_].depositer, depositId_, vExValue, "payReward", deposits[depositId_].mCurrent);
+        }
+    }       
 }
