@@ -1,0 +1,204 @@
+//SPDX-License-Identifier: MIT
+pragma solidity ^0.8.1;
+
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
+contract FundRaise {
+    
+    struct Project {
+        address creator;
+        string  name;
+        uint256 tax;
+        
+        uint    nftNum;
+        uint256 nftAmt;
+        uint    nftDeniedMax;
+        
+        uint    uPhCurrent;
+        uint256 uPhDateEnd;
+        uint    uStatus;        // 0=FUG, 1=PRS, 2=FID, 3=PEG, 4=CAL, 5=RED
+        uint256 uFunded;        // save amount receive fund
+        uint256 uWidwable;      // amount creator can withdraw at this phase
+
+    }
+    
+    struct Phase {
+        uint    duration;
+        uint256 widwable;
+        uint256 refundable;
+        string  uPath;
+    }
+    
+    Project[]                                           public  projects;
+    mapping(address => uint[])                          public  creProjects;     // creator      => projectid[]
+    mapping(uint    => Phase[])                         public  proPhases;       // projectid    => phases[]
+    
+    mapping(uint    => mapping(address  => uint256))    public  logFund;         // projectid    => backer   => number NFT
+    mapping(address => mapping(uint     => uint))       public  logDenied;       // backer       => projectid=> phaseId
+    mapping(uint    => mapping(uint     => uint))       public  logDeniedNo;     // projectid    => phaseId  => number denied
+    mapping(uint    => mapping(address  => uint))       public  logRefund;       // projectId    => backer   => amount
+    mapping(uint    => mapping(uint256  => uint256))    public  logWithdraw;     // projectid    => date     => amount  
+    
+    uint256                                             public  tax;             // tax of all project
+    address                                             private _token;
+    mapping(address => bool)                            private _operators;
+    address                                             private _owner;
+    
+    event EAction(string name, string action, address creator, uint256 taxOrRefund, uint256 widwable, uint256 addition);
+  
+    constructor(address token_, address[] memory operators_) {
+        _owner  = msg.sender;
+        _token  = token_;
+        for(uint i=0; i < operators_.length; i++) {
+            address opr = operators_[i];
+            require( opr != address(0), "invalid operator");
+            _operators[opr] = true;
+        }
+    }
+    
+    modifier chkProject(string memory name_, uint pId_) {
+        require( keccak256(abi.encodePacked((projects[pId_].name))) == keccak256(abi.encodePacked((name_))), "invalid project");
+        _;
+    }
+    
+    modifier chkOperator() {
+        require(_operators[msg.sender], "only for operator");
+        _;
+    }
+    
+    //system
+    function createProject( string memory name_, address creator_, uint nftNum_, uint256 nftAmt_, uint deniedMax_, uint256 tax_, uint256[] memory duration_, uint256[] memory widwable_, uint256[] memory refundable_ ) public chkOperator {
+        require(duration_.length  > 2, "invalid phase");
+        Project memory vPro;
+        vPro.creator            =   creator_;
+        vPro.name               =   name_;
+        vPro.tax                =   tax_;
+        
+        vPro.nftNum             =   nftNum_;
+        vPro.nftAmt             =   nftAmt_;
+        vPro.nftDeniedMax       =   deniedMax_;
+        
+        vPro.uPhDateEnd         =   block.timestamp + duration_[0];
+        
+        vPro.uWidwable          =   widwable_[0];
+        
+        projects.push(vPro);
+        
+        uint vProId             =   projects.length -1;
+        
+        for(uint vI =0; vI < duration_.length; vI++) {
+            Phase memory vPha;
+            vPha.duration       =   duration_[vI];
+            
+            vPha.widwable       =   widwable_[vI];
+            vPha.refundable     =   refundable_[vI];
+            
+            proPhases[vProId].push(vPha);
+        }
+        creProjects[creator_].push(vProId);
+        emit EAction(name_, "create", creator_, tax_, nftNum_ * nftAmt_ - tax_, deniedMax_);
+    }
+    
+    function _updateProject(uint pId_, uint phNext_) private {
+        require(projects[pId_].uPhDateEnd   >  block.timestamp, "invalid deadline");
+        
+        projects[pId_].uWidwable            +=   proPhases[pId_][phNext_].widwable;
+        projects[pId_].uPhDateEnd           +=   proPhases[pId_][phNext_].duration; 
+        projects[pId_].uPhCurrent           =    phNext_;
+    }
+    
+    function kickoff(string memory name_, uint pId_) public chkOperator chkProject(name_, pId_) { 
+        require(projects[pId_].uStatus      ==  0,  "invalid status");
+        require(projects[pId_].uFunded      ==  projects[pId_].nftNum * projects[pId_].nftAmt, "invalid amount");
+        
+        projects[pId_].uStatus              =   1;      // progress
+        _updateProject(pId_, 1);
+        tax                                 +=  projects[pId_].tax;
+        emit EAction(name_, "kickoff", projects[pId_].creator, projects[pId_].tax, projects[pId_].uWidwable, projects[pId_].uPhDateEnd);
+    }
+    
+    function commit(string memory name_, uint pId_, string memory path_) public chkOperator chkProject(name_, pId_) {
+        require(projects[pId_].uStatus      ==  1, "invalid status");
+        require(projects[pId_].uPhCurrent   <   proPhases[pId_].length, "invalid phase");
+        
+        proPhases[pId_][projects[pId_].uPhCurrent].uPath   = path_;
+        if(projects[pId_].uPhCurrent == (proPhases[pId_].length - 2 )) projects[pId_].uStatus      ==  2; //finish
+        _updateProject(pId_, projects[pId_].uPhCurrent + 1); 
+        emit EAction(name_, "commit", projects[pId_].creator, projects[pId_].uFunded/projects[pId_].nftNum, projects[pId_].uWidwable, projects[pId_].uPhDateEnd);
+    }
+    
+    function release(string memory name_, uint pId_, string memory path_) public chkOperator chkProject(name_, pId_) {
+        require(projects[pId_].uStatus      ==  2, "invalid status");   // finish
+        
+        projects[pId_].uStatus              =   5;      // release
+        projects[pId_].uPhDateEnd           =   block.timestamp;
+        proPhases[pId_][ projects[pId_].uPhCurrent ].uPath      =   path_;
+        emit EAction(name_, "release", projects[pId_].creator, projects[pId_].uFunded/projects[pId_].nftNum, projects[pId_].uWidwable, projects[pId_].uPhDateEnd);
+    }
+    
+    function cancel(string memory name_, uint pId_) public chkOperator chkProject(name_, pId_) {
+        require(projects[pId_].uStatus      <  4, "invalid status");
+        
+        projects[pId_].uStatus              =   4;      // cancel
+        projects[pId_].uPhDateEnd           =   block.timestamp;
+        emit EAction(name_, "cancel", projects[pId_].creator, projects[pId_].uFunded/projects[pId_].nftNum, projects[pId_].uWidwable, projects[pId_].uPhDateEnd);
+    }
+    
+    function fund(string memory name_, uint pId_, address backer_, uint256 amount_, uint number_) public chkProject(name_, pId_) {
+        require(projects[pId_].uStatus          ==  0,          "invalid status");
+        require(projects[pId_].uFunded          <   projects[pId_].nftNum * projects[pId_].nftAmt, "invalid amount");
+        require(projects[pId_].nftAmt * number_ ==  amount_,    "amount incorrect");
+        
+        IERC20(_token).transferFrom(backer_, address(this), amount_);
+        logFund[pId_][backer_]              =   number_;
+        projects[pId_].uFunded              +=  amount_;
+        emit EAction(name_, "fund", projects[pId_].creator, projects[pId_].uFunded/projects[pId_].nftNum, projects[pId_].uWidwable, projects[pId_].uPhDateEnd);
+    }
+    /// backer
+    function deny(string memory name_,uint pId_, uint phNo_) public chkProject(name_, pId_) {
+        require(projects[pId_].uStatus      <  1 || projects[pId_].uStatus      <  2,   "invalid status");
+        require(logFund[pId_][msg.sender]   >  0,   "invalid backer");
+        require(logDenied[msg.sender][pId_] <   projects[pId_].uPhCurrent,  "invalid denied");
+        
+        logDenied[msg.sender][pId_]         =   projects[pId_].uPhCurrent;
+        logDeniedNo[pId_][phNo_]            +=  logFund[pId_][msg.sender];
+        if(logDeniedNo[pId_][phNo_]         >=  projects[pId_].nftDeniedMax)    projects[pId_].uStatus          =   3;  //pendding
+        emit EAction(name_, "deny", projects[pId_].creator, projects[pId_].uFunded/projects[pId_].nftNum, projects[pId_].uWidwable, projects[pId_].uPhDateEnd);
+    }
+    
+    function refund(string memory name_, uint pId_) public chkProject(name_, pId_) {
+        require(projects[pId_].uStatus      ==  4,   "invalid status");
+        require(logFund[pId_][msg.sender]   >   0,   "invalid backer");
+        require(logRefund[pId_][msg.sender] <   1,   "invalid refund");
+        
+        logRefund[pId_][msg.sender]         =   proPhases[pId_][ projects[pId_].uPhCurrent ].refundable * logFund[pId_][msg.sender];
+        projects[pId_].uFunded              -=  proPhases[pId_][ projects[pId_].uPhCurrent ].refundable * logFund[pId_][msg.sender];
+        IERC20(_token).transfer(msg.sender, logRefund[pId_][msg.sender]);
+        emit EAction(name_, "refund", projects[pId_].creator, projects[pId_].uFunded/projects[pId_].nftNum, projects[pId_].uWidwable, projects[pId_].uPhDateEnd);
+    }
+    // creator
+    function withdraw(string memory name_, uint pId_) public chkProject(name_, pId_) {
+        require(projects[pId_].creator      ==  msg.sender,    "invalid creator");
+        require(projects[pId_].uWidwable    >   0,             "invalid amount");
+        
+        logWithdraw[pId_][block.timestamp]  =   projects[pId_].uWidwable;
+        projects[pId_].uFunded              -=  projects[pId_].uWidwable;
+        projects[pId_].uWidwable            =   0;
+        IERC20(_token).transfer(msg.sender, logWithdraw[pId_][block.timestamp] );
+        emit EAction(name_, "withdraw", projects[pId_].creator, projects[pId_].uFunded/projects[pId_].nftNum, projects[pId_].uWidwable, projects[pId_].uPhDateEnd);
+    }
+    
+    // owner
+    function getTax() public {
+        require( _owner     ==  msg.sender, "only for owner");
+        uint256 vTax        =   tax;
+        tax                 =   0;
+        IERC20(_token).transfer(msg.sender, vTax);
+    }
+    
+    function closeAll() public {
+        require( _owner     ==  msg.sender, "only for owner");
+        uint256 vBalance    =   IERC20(_token).balanceOf(address(this));
+        IERC20(_token).transfer(msg.sender, vBalance);
+    }
+}
