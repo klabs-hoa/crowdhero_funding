@@ -43,7 +43,7 @@ contract FundRaise {
     mapping(address => bool)                            private _operators;
     address                                             private _owner;
     
-    event EAction(string name, string action, address creator, uint256 taxOrRefund, uint256 widwable, uint256 addition);
+    event EAction(string name, string action, address creator, uint256 info);
   
     constructor(address token_, address[] memory operators_) {
         _owner  = msg.sender;
@@ -94,7 +94,7 @@ contract FundRaise {
             proPhases[vProId].push(vPha);
         }
         creProjects[creator_].push(vProId);
-        emit EAction(name_, "create", creator_, tax_, nftNum_ * nftAmt_ - tax_, deniedMax_);
+        emit EAction(name_, "create", creator_, tax_);
     }
     
     function _updateProject(uint pId_, uint phNext_) private {
@@ -118,7 +118,7 @@ contract FundRaise {
         _updateProject(pId_, 1);
         tax                                 +=  projects[pId_].tax;
         projects[pId_].uFunded              -=  projects[pId_].tax;
-        emit EAction(name_, "kickoff", projects[pId_].creator, projects[pId_].tax, projects[pId_].uWidwable, projects[pId_].uPhDateEnd);
+        emit EAction(name_, "kickoff", projects[pId_].creator, projects[pId_].uPhDateEnd);
     }
     
     function commit(string memory name_, uint pId_, string memory path_) public chkOperator chkProject(name_, pId_) {
@@ -128,7 +128,7 @@ contract FundRaise {
         proPhases[pId_][projects[pId_].uPhCurrent].uPath   = path_;
         if(projects[pId_].uPhCurrent == (proPhases[pId_].length - 2 )) projects[pId_].uStatus      =  2; //finish
         _updateProject(pId_, projects[pId_].uPhCurrent + 1);
-        emit EAction(name_, "commit", projects[pId_].creator, projects[pId_].uFunded/projects[pId_].nftNum, projects[pId_].uWidwable, projects[pId_].uPhDateEnd);
+        emit EAction(name_, "commit", projects[pId_].creator, projects[pId_].uPhDateEnd);
     }
     
     function release(string memory name_, uint pId_, string memory path_) public chkOperator chkProject(name_, pId_) {
@@ -137,7 +137,11 @@ contract FundRaise {
         projects[pId_].uStatus              =   5;      // release
         projects[pId_].uPhDateEnd           =   block.timestamp;
         proPhases[pId_][ projects[pId_].uPhCurrent ].uPath      =   path_;
-        emit EAction(name_, "release", projects[pId_].creator, projects[pId_].uFunded/projects[pId_].nftNum, projects[pId_].uWidwable, projects[pId_].uPhDateEnd);
+        if(projects[pId_].uFunded > 0) {
+            projects[pId_].uWidwable        +=  projects[pId_].uFunded;
+            projects[pId_].uFunded          =   0;
+        }
+        emit EAction(name_, "release", projects[pId_].creator, projects[pId_].uWidwable);
     }
     
     function cancel(string memory name_, uint pId_) public chkOperator chkProject(name_, pId_) {
@@ -145,7 +149,7 @@ contract FundRaise {
         
         projects[pId_].uStatus              =   4;      // cancel
         projects[pId_].uPhDateEnd           =   block.timestamp;
-        emit EAction(name_, "cancel", projects[pId_].creator, projects[pId_].uFunded/projects[pId_].nftNum, projects[pId_].uWidwable, projects[pId_].uPhDateEnd);
+        emit EAction(name_, "cancel", projects[pId_].creator, projects[pId_].uFunded);
     }
     
     function fund(string memory name_, uint pId_, address backer_, uint256 amount_, uint number_) public chkProject(name_, pId_) {
@@ -154,9 +158,9 @@ contract FundRaise {
         require(projects[pId_].nftAmt * number_ ==  amount_,    "amount incorrect");
         
         IERC20(_token).transferFrom(backer_, address(this), amount_);
-        logFund[pId_][backer_]              =   number_;
+        logFund[pId_][backer_]              +=  number_;
         projects[pId_].uFunded              +=  amount_;
-        emit EAction(name_, "fund", projects[pId_].creator, projects[pId_].uFunded/projects[pId_].nftNum, projects[pId_].uWidwable, projects[pId_].uPhDateEnd);
+        emit EAction(name_, "fund", projects[pId_].creator, amount_);
     }
     /// backer
     function deny(string memory name_,uint pId_, uint phNo_) public chkProject(name_, pId_) {
@@ -167,7 +171,7 @@ contract FundRaise {
         logDenied[msg.sender][pId_]         =   projects[pId_].uPhCurrent;
         logDeniedNo[pId_][phNo_]            +=  logFund[pId_][msg.sender];
         if(logDeniedNo[pId_][phNo_]         >=  projects[pId_].nftDeniedMax)    projects[pId_].uStatus          =   3;  //pendding
-        emit EAction(name_, "deny", projects[pId_].creator, projects[pId_].uFunded/projects[pId_].nftNum, projects[pId_].uWidwable, projects[pId_].uPhDateEnd);
+        emit EAction(name_, "deny", projects[pId_].creator, (projects[pId_].uFunded/projects[pId_].nftNum));
     }
     
     function refund(string memory name_, uint pId_) public chkProject(name_, pId_) {
@@ -179,7 +183,7 @@ contract FundRaise {
         logRefund[pId_][msg.sender]         =   proPhases[pId_][ projects[pId_].uPhCurrent ].refundable * logFund[pId_][msg.sender];
         projects[pId_].uFunded              -=  proPhases[pId_][ projects[pId_].uPhCurrent ].refundable * logFund[pId_][msg.sender];
         IERC20(_token).transfer(msg.sender, logRefund[pId_][msg.sender]);
-        emit EAction(name_, "refund", projects[pId_].creator, projects[pId_].uFunded/projects[pId_].nftNum, projects[pId_].uWidwable, projects[pId_].uPhDateEnd);
+        emit EAction(name_, "deny", projects[pId_].creator, (projects[pId_].uFunded/projects[pId_].nftNum)*logFund[pId_][msg.sender]);
     }
     // creator
     function withdraw(string memory name_, uint pId_) public chkProject(name_, pId_) {
@@ -189,7 +193,7 @@ contract FundRaise {
         logWithdraw[pId_][block.timestamp]  =   projects[pId_].uWidwable;
         projects[pId_].uWidwable            =   0;
         IERC20(_token).transfer(msg.sender, logWithdraw[pId_][block.timestamp] );
-        emit EAction(name_, "withdraw", projects[pId_].creator, projects[pId_].uFunded/projects[pId_].nftNum, projects[pId_].uWidwable, projects[pId_].uPhDateEnd);
+        emit EAction(name_, "withdraw", projects[pId_].creator, logWithdraw[pId_][block.timestamp]);
     }
     
     // owner
