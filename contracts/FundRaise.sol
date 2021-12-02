@@ -10,7 +10,7 @@ contract FundRaise {
         uint256 tax;
         uint    nftNum;
         uint256 nftAmt;
-        uint    nftDeniedMax;
+        uint    nftDeniedMax;        
     }
     
     struct UpProject {   
@@ -21,6 +21,8 @@ contract FundRaise {
         uint    uStatus;        // 0=FUG, 1=PRS, 2=FID, 3=PEG, 4=CAL, 5=RED
         uint256 uFunded;        // save amount receive fund
         uint256 uWidwable;      // amount creator can withdraw at this phase
+        uint256 uNftAmtBack;
+        uint256 uNftFeeBack;
     }
 
     struct Phase {
@@ -35,7 +37,8 @@ contract FundRaise {
     mapping(address => uint[])                          public  creProjects;     // creator      => projectid[]
     mapping(uint    => Phase[])                         public  proPhases;       // projectid    => phases[]
     
-    mapping(uint    => mapping(address  => uint256))    public  logFund;         // projectid    => backer   => number NFT
+    mapping(uint    => mapping(address  => uint256))    public  logFund;         // projectid    => early   => number NFT
+    mapping(uint    => mapping(address  => uint256))    public  logNum;          // projectid    => backer  => number NFT
     mapping(address => mapping(uint     => uint))       public  logDenied;       // backer       => projectid=> phaseId
     mapping(uint    => mapping(uint     => uint))       public  logDeniedNo;     // projectid    => phaseId  => number denied
     mapping(uint    => mapping(address  => uint))       public  logRefund;       // projectId    => backer   => amount
@@ -69,7 +72,7 @@ contract FundRaise {
     }
     
     //system
-    function createProject( string memory name_, address creator_, uint nftNum_, uint256 nftAmt_, uint deniedMax_, uint256 tax_, uint256[] memory duration_, uint256[] memory widwable_, uint256[] memory refundable_ ) public chkOperator {
+    function createProject( string memory name_, address creator_, uint nftNum_, uint256 nftAmt_, uint deniedMax_, uint256 tax_, uint256 uNftAmtlate_, uint256 uNftFeeLate_, uint256[] memory duration_, uint256[] memory widwable_, uint256[] memory refundable_ ) public chkOperator {
         require(duration_.length  > 3, "invalid phase");
         Project memory vPro;
         vPro.name               =   name_;
@@ -81,10 +84,12 @@ contract FundRaise {
         projects.push(vPro);
 
         UpProject memory vUpPro;
-        vUpPro.uCreator            =   creator_;
-        vUpPro.uPhDateStart       =   block.timestamp;
-        vUpPro.uPhDateEnd         =   block.timestamp + duration_[0];
-        vUpPro.uWidwable          =   widwable_[0];
+        vUpPro.uCreator             =   creator_;
+        vUpPro.uPhDateStart         =   block.timestamp;
+        vUpPro.uPhDateEnd           =   block.timestamp + duration_[0];
+        vUpPro.uWidwable            =   widwable_[0];
+        vUpPro.uNftAmtBack          =   uNftAmtlate_;
+        vUpPro.uNftFeeBack          =   uNftFeeLate_;
         upProjects.push(vUpPro);
         
         
@@ -162,9 +167,28 @@ contract FundRaise {
         
         IERC20(_token).transferFrom(backer_, address(this), amount_);
         logFund[pId_][backer_]                      +=  number_;
+        logNum[pId_][backer_]                       +=  number_;
         upProjects[pId_].uFunded                    +=  amount_;
         emit EAction(name_, "fund", upProjects[pId_].uCreator, amount_);
     }
+
+    function setBack(string memory name_, uint pId_, uint256 nftAmtLate_, uint256 nftFeeLate_) public chkOperator chkProject(name_, pId_) {
+        upProjects[pId_].uNftAmtBack                = nftAmtLate_;
+        upProjects[pId_].uNftFeeBack                = nftFeeLate_;
+    }
+
+    function back(string memory name_, uint pId_, address backer_, uint256 amount_, uint number_) public chkProject(name_, pId_) {
+        require(upProjects[pId_].uStatus                <   3,          "invalid status");
+        require(upProjects[pId_].uNftAmtBack * number_  ==  amount_,    "amount incorrect");
+        require(upProjects[pId_].uFunded                >=  projects[pId_].nftNum * projects[pId_].nftAmt, "invalid amount");
+        
+        IERC20(_token).transferFrom(backer_, address(this), amount_);
+        tax                                         +=  upProjects[pId_].uNftFeeBack * number_;
+        logNum[pId_][backer_]                       +=  number_;
+        upProjects[pId_].uFunded                    +=  amount_ - (upProjects[pId_].uNftFeeBack * number_);
+        emit EAction(name_, "fundLate", upProjects[pId_].uCreator, amount_);
+    }
+
     /// backer
     function deny(string memory name_,uint pId_, uint phNo_) public chkProject(name_, pId_) {
         require(upProjects[pId_].uStatus            ==  1 || upProjects[pId_].uStatus      ==  2,   "invalid status");
@@ -179,14 +203,14 @@ contract FundRaise {
     
     function refund(string memory name_, uint pId_) public chkProject(name_, pId_) {
         require(upProjects[pId_].uStatus            ==  4,   "invalid status");
-        require(logFund[pId_][msg.sender]           >   0,   "invalid backer");
+        require(logNum[pId_][msg.sender]            >   0,   "invalid backer");
         require(logRefund[pId_][msg.sender]         <   1,   "invalid refund");
         require(upProjects[pId_].uFunded            >   0,   "invalid amount");
         
-        logRefund[pId_][msg.sender]                 =   proPhases[pId_][ upProjects[pId_].uPhCurrent ].refundable * logFund[pId_][msg.sender];
-        upProjects[pId_].uFunded                    -=  proPhases[pId_][ upProjects[pId_].uPhCurrent ].refundable * logFund[pId_][msg.sender];
+        logRefund[pId_][msg.sender]                 =   proPhases[pId_][ upProjects[pId_].uPhCurrent ].refundable * logNum[pId_][msg.sender];
+        upProjects[pId_].uFunded                    -=  proPhases[pId_][ upProjects[pId_].uPhCurrent ].refundable * logNum[pId_][msg.sender];
         IERC20(_token).transfer(msg.sender, logRefund[pId_][msg.sender]);
-        emit EAction(name_, "deny", upProjects[pId_].uCreator, (upProjects[pId_].uFunded/projects[pId_].nftNum)*logFund[pId_][msg.sender]);
+        emit EAction(name_, "deny", upProjects[pId_].uCreator, (upProjects[pId_].uFunded/projects[pId_].nftNum)*logNum[pId_][msg.sender]);
     }
     // creator
     function withdraw(string memory name_, uint pId_) public chkProject(name_, pId_) {
