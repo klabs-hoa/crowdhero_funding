@@ -6,15 +6,14 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 contract FundRaise {
     
     struct Project {
-        string  name;
         uint256 tax;
         uint    nftNum;
         uint256 nftAmt;
-        uint    nftDeniedMax;        
+        uint    nftDeniedMax;
     }
     
-    struct UpProject {   
-        address uCreator;    
+    struct UpProject {
+        address uCreator;
         uint    uPhCurrent;
         uint256 uPhDateStart;
         uint256 uPhDateEnd;
@@ -49,7 +48,7 @@ contract FundRaise {
     mapping(address => bool)                            private _operators;
     address                                             private _owner;
     
-    event EAction(string name, string action, address creator, uint256 info);
+    event EAction(uint id, string action, address creator, uint256 info);
   
     constructor(address token_, address[] memory operators_) {
         _owner  = msg.sender;
@@ -61,21 +60,19 @@ contract FundRaise {
         }
     }
     
-    modifier chkProject(string memory name_, uint pId_) {
-        require( keccak256(abi.encodePacked((projects[pId_].name))) == keccak256(abi.encodePacked((name_))), "invalid project");
-        _;
-    }
-    
     modifier chkOperator() {
         require(_operators[msg.sender], "only for operator");
         _;
     }
     
+    function maxProjectId() public view returns(uint256) {
+        return projects.length - 1;
+    }
+
     //system
-    function createProject( string memory name_, address creator_, uint nftNum_, uint256 nftAmt_, uint deniedMax_, uint256 tax_, uint256 uNftAmtlate_, uint256 uNftFeeLate_, uint256[] memory duration_, uint256[] memory widwable_, uint256[] memory refundable_ ) public chkOperator {
+    function createProject( address creator_, uint nftNum_, uint256 nftAmt_, uint deniedMax_, uint256 tax_, uint256 uNftAmtlate_, uint256 uNftFeeLate_, uint256[] memory duration_, uint256[] memory widwable_, uint256[] memory refundable_ ) public chkOperator {
         require(duration_.length  > 3, "invalid phase");
         Project memory vPro;
-        vPro.name               =   name_;
         vPro.tax                =   tax_;
         
         vPro.nftNum             =   nftNum_;
@@ -93,7 +90,7 @@ contract FundRaise {
         upProjects.push(vUpPro);
         
         
-        uint vProId             =   projects.length -1;
+        uint vProId             =   maxProjectId();
         
         for(uint vI =0; vI < duration_.length; vI++) {
             Phase memory vPha;
@@ -104,7 +101,7 @@ contract FundRaise {
             proPhases[vProId].push(vPha);
         }
         creProjects[creator_].push(vProId);
-        emit EAction(name_, "create", creator_, tax_);
+        emit EAction(vProId, "create", creator_, tax_);
     }
     
     function _updateProject(uint pId_, uint phNext_) private {
@@ -118,7 +115,7 @@ contract FundRaise {
         upProjects[pId_].uPhCurrent             =    phNext_;
     }
     
-    function kickoff(string memory name_, uint pId_) public chkOperator chkProject(name_, pId_) { 
+    function kickoff(uint pId_) public chkOperator {
         require(upProjects[pId_].uStatus        ==  0,  "invalid status");
         require(upProjects[pId_].uFunded        ==  projects[pId_].nftNum * projects[pId_].nftAmt, "invalid amount");
         
@@ -126,20 +123,20 @@ contract FundRaise {
         _updateProject(pId_, 1);
         tax                                     +=  projects[pId_].tax;
         upProjects[pId_].uFunded                -=  projects[pId_].tax;
-        emit EAction(name_, "kickoff", upProjects[pId_].uCreator, upProjects[pId_].uPhDateEnd);
+        emit EAction(pId_, "kickoff", upProjects[pId_].uCreator, upProjects[pId_].uPhDateEnd);
     }
     
-    function commit(string memory name_, uint pId_, string memory path_) public chkOperator chkProject(name_, pId_) {
+    function commit(uint pId_, string memory path_) public chkOperator {
         require(upProjects[pId_].uStatus        ==  1, "invalid status");
         require(upProjects[pId_].uPhCurrent     <   proPhases[pId_].length, "invalid phase");
         
         proPhases[pId_][upProjects[pId_].uPhCurrent].uPath   = path_;
         if(upProjects[pId_].uPhCurrent == (proPhases[pId_].length - 2 )) upProjects[pId_].uStatus      =  2; //finish
         _updateProject(pId_, upProjects[pId_].uPhCurrent + 1);
-        emit EAction(name_, "commit", upProjects[pId_].uCreator, upProjects[pId_].uPhDateEnd);
+        emit EAction(pId_, "commit", upProjects[pId_].uCreator, upProjects[pId_].uPhDateEnd);
     }
     
-    function release(string memory name_, uint pId_, string memory path_) public chkOperator chkProject(name_, pId_) {
+    function release( uint pId_, string memory path_) public chkOperator {
         require(upProjects[pId_].uStatus      ==  2, "invalid status");   // finish
         
         upProjects[pId_].uStatus              =   5;      // release
@@ -149,18 +146,18 @@ contract FundRaise {
             upProjects[pId_].uWidwable        +=  upProjects[pId_].uFunded;
             upProjects[pId_].uFunded          =   0;
         }
-        emit EAction(name_, "release", upProjects[pId_].uCreator, upProjects[pId_].uWidwable);
+        emit EAction(pId_, "release", upProjects[pId_].uCreator, upProjects[pId_].uWidwable);
     }
     
-    function cancel(string memory name_, uint pId_) public chkOperator chkProject(name_, pId_) {
+    function cancel( uint pId_) public chkOperator {
         require(upProjects[pId_].uStatus      <  4, "invalid status");
         
         upProjects[pId_].uStatus              =   4;      // cancel
         upProjects[pId_].uPhDateEnd           =   block.timestamp;
-        emit EAction(name_, "cancel", upProjects[pId_].uCreator, upProjects[pId_].uFunded);
+        emit EAction(pId_, "cancel", upProjects[pId_].uCreator, upProjects[pId_].uFunded);
     }
     
-    function fund(string memory name_, uint pId_, address backer_, uint256 amount_, uint number_) public chkProject(name_, pId_) {
+    function fund( uint pId_, address backer_, uint256 amount_, uint number_) public {
         require(upProjects[pId_].uStatus            ==  0,          "invalid status");
         require(projects[pId_].nftAmt * number_     ==  amount_,    "amount incorrect");
         require(upProjects[pId_].uFunded + amount_  <=  projects[pId_].nftNum * projects[pId_].nftAmt, "invalid amount");
@@ -169,15 +166,15 @@ contract FundRaise {
         logFund[pId_][backer_]                      +=  number_;
         logNum[pId_][backer_]                       +=  number_;
         upProjects[pId_].uFunded                    +=  amount_;
-        emit EAction(name_, "fund", upProjects[pId_].uCreator, amount_);
+        emit EAction(pId_, "fund", upProjects[pId_].uCreator, amount_);
     }
 
-    function setBack(string memory name_, uint pId_, uint256 nftAmtLate_, uint256 nftFeeLate_) public chkOperator chkProject(name_, pId_) {
+    function setBack( uint pId_, uint256 nftAmtLate_, uint256 nftFeeLate_) public chkOperator {
         upProjects[pId_].uNftAmtBack                = nftAmtLate_;
         upProjects[pId_].uNftFeeBack                = nftFeeLate_;
     }
 
-    function back(string memory name_, uint pId_, address backer_, uint256 amount_, uint number_) public chkProject(name_, pId_) {
+    function back( uint pId_, address backer_, uint256 amount_, uint number_) public {
         require(upProjects[pId_].uStatus                <   3,          "invalid status");
         require(upProjects[pId_].uNftAmtBack * number_  ==  amount_,    "amount incorrect");
         require(upProjects[pId_].uFunded                >=  projects[pId_].nftNum * projects[pId_].nftAmt, "invalid amount");
@@ -186,11 +183,11 @@ contract FundRaise {
         tax                                         +=  upProjects[pId_].uNftFeeBack * number_;
         logNum[pId_][backer_]                       +=  number_;
         upProjects[pId_].uFunded                    +=  amount_ - (upProjects[pId_].uNftFeeBack * number_);
-        emit EAction(name_, "fundLate", upProjects[pId_].uCreator, amount_);
+        emit EAction(pId_, "fundLate", upProjects[pId_].uCreator, amount_);
     }
 
     /// backer
-    function deny(string memory name_,uint pId_, uint phNo_) public chkProject(name_, pId_) {
+    function deny(uint pId_, uint phNo_) public {
         require(upProjects[pId_].uStatus            ==  1 || upProjects[pId_].uStatus      ==  2,   "invalid status");
         require(logFund[pId_][msg.sender]           >  0,   "invalid backer");
         require(logDenied[msg.sender][pId_]         <   upProjects[pId_].uPhCurrent,  "invalid denied");
@@ -198,10 +195,10 @@ contract FundRaise {
         logDenied[msg.sender][pId_]                 =   upProjects[pId_].uPhCurrent;
         logDeniedNo[pId_][phNo_]                    +=  logFund[pId_][msg.sender];
         if(logDeniedNo[pId_][phNo_]                 >=  projects[pId_].nftDeniedMax)    upProjects[pId_].uStatus          =   3;  //pendding
-        emit EAction(name_, "deny", upProjects[pId_].uCreator, (upProjects[pId_].uFunded/projects[pId_].nftNum));
+        emit EAction(pId_, "deny", upProjects[pId_].uCreator, (upProjects[pId_].uFunded/projects[pId_].nftNum));
     }
     
-    function refund(string memory name_, uint pId_) public chkProject(name_, pId_) {
+    function refund( uint pId_) public {
         require(upProjects[pId_].uStatus            ==  4,   "invalid status");
         require(logNum[pId_][msg.sender]            >   0,   "invalid backer");
         require(logRefund[pId_][msg.sender]         <   1,   "invalid refund");
@@ -210,17 +207,17 @@ contract FundRaise {
         logRefund[pId_][msg.sender]                 =   proPhases[pId_][ upProjects[pId_].uPhCurrent ].refundable * logNum[pId_][msg.sender];
         upProjects[pId_].uFunded                    -=  proPhases[pId_][ upProjects[pId_].uPhCurrent ].refundable * logNum[pId_][msg.sender];
         IERC20(_token).transfer(msg.sender, logRefund[pId_][msg.sender]);
-        emit EAction(name_, "deny", upProjects[pId_].uCreator, (upProjects[pId_].uFunded/projects[pId_].nftNum)*logNum[pId_][msg.sender]);
+        emit EAction(pId_, "deny", upProjects[pId_].uCreator, (upProjects[pId_].uFunded/projects[pId_].nftNum)*logNum[pId_][msg.sender]);
     }
     // creator
-    function withdraw(string memory name_, uint pId_) public chkProject(name_, pId_) {
+    function withdraw( uint pId_) public {
         require(upProjects[pId_].uCreator           ==  msg.sender,    "invalid creator");
         require(upProjects[pId_].uWidwable          >   0,             "invalid amount");
         
         logWithdraw[pId_][block.timestamp]          =   upProjects[pId_].uWidwable;
         upProjects[pId_].uWidwable                  =   0;
         IERC20(_token).transfer(msg.sender, logWithdraw[pId_][block.timestamp] );
-        emit EAction(name_, "withdraw", upProjects[pId_].uCreator, logWithdraw[pId_][block.timestamp]);
+        emit EAction(pId_, "withdraw", upProjects[pId_].uCreator, logWithdraw[pId_][block.timestamp]);
     }
     
     // owner
@@ -231,7 +228,7 @@ contract FundRaise {
         IERC20(_token).transfer(msg.sender, vTax);
     }
     
-    function owCloseProject(string memory name_, uint pId_) public chkProject(name_, pId_) {
+    function owCloseProject( uint pId_) public {
         require( _owner     ==  msg.sender, "only for owner");
         uint256 vBalance    =   upProjects[pId_].uWidwable + upProjects[pId_].uFunded + projects[pId_].tax;
         upProjects[pId_].uWidwable      =   0; 
