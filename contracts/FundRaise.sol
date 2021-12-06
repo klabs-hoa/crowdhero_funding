@@ -174,6 +174,7 @@ contract FundRaise {
     }
 
     function back( uint pId_, address backer_, uint256 amount_, uint number_) public {
+        require(upProjects[pId_].uNftAmtBack            >   0,          "invalid back");
         require(upProjects[pId_].uStatus                <   3,          "invalid status");
         require(upProjects[pId_].uNftAmtBack * number_  ==  amount_,    "amount incorrect");
         require(upProjects[pId_].uFunded                >=  projects[pId_].nftNum * projects[pId_].nftAmt, "invalid amount");
