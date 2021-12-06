@@ -33,7 +33,6 @@ contract FundRaise {
     
     Project[]                                           public  projects;
     UpProject[]                                         public  upProjects;
-    mapping(address => uint[])                          public  creProjects;     // creator      => projectid[]
     mapping(uint    => Phase[])                         public  proPhases;       // projectid    => phases[]
     
     mapping(uint    => mapping(address  => uint256))    public  logFund;         // projectid    => early   => number NFT
@@ -100,7 +99,7 @@ contract FundRaise {
             
             proPhases[vProId].push(vPha);
         }
-        creProjects[creator_].push(vProId);
+        
         emit EAction(vProId, "create", creator_, tax_);
     }
     
