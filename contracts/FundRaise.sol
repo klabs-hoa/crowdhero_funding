@@ -183,7 +183,7 @@ contract FundRaise {
         tax                                         +=  upProjects[pId_].uNftFeeBack * number_;
         logNum[pId_][backer_]                       +=  number_;
         upProjects[pId_].uFunded                    +=  amount_ - (upProjects[pId_].uNftFeeBack * number_);
-        emit EAction(pId_, "fundLate", upProjects[pId_].uCreator, amount_);
+        emit EAction(pId_, "back", upProjects[pId_].uCreator, amount_);
     }
 
     /// backer
