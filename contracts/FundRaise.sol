@@ -19,9 +19,11 @@ contract FundRaise {
         uint256 uPhDateEnd;
         uint    uStatus;        // 0=FUG, 1=PRS, 2=FID, 3=PEG, 4=CAL, 5=RED
         uint256 uFunded;        // save amount receive fund
+        uint256 uNftNum;
         uint256 uWidwable;      // amount creator can withdraw at this phase
         uint256 uNftAmtBack;
         uint256 uNftFeeBack;
+        uint256 uNftLimitBack;
     }
 
     struct Phase {
@@ -165,16 +167,18 @@ contract FundRaise {
         logFund[pId_][backer_]                      +=  number_;
         logNum[pId_][backer_]                       +=  number_;
         upProjects[pId_].uFunded                    +=  amount_;
+        upProjects[pId_].uNftNum++;
         emit EAction(pId_, "fund", upProjects[pId_].uCreator, amount_);
     }
 
-    function setBack( uint pId_, uint256 nftAmtLate_, uint256 nftFeeLate_) public chkOperator {
+    function setBack( uint pId_, uint256 nftAmtLate_, uint256 nftFeeLate_, uint256 nftLimitLate_) public chkOperator {
         upProjects[pId_].uNftAmtBack                = nftAmtLate_;
         upProjects[pId_].uNftFeeBack                = nftFeeLate_;
+        upProjects[pId_].uNftLimitBack              = nftLimitLate_;
     }
 
     function back( uint pId_, address backer_, uint256 amount_, uint number_) public {
-        require(upProjects[pId_].uNftAmtBack            >   0,          "invalid back");
+        require(upProjects[pId_].uNftLimitBack          >=  number_,    "invalid back");
         require(upProjects[pId_].uStatus                <   3,          "invalid status");
         require(upProjects[pId_].uNftAmtBack * number_  ==  amount_,    "amount incorrect");
         require(upProjects[pId_].uFunded                >=  projects[pId_].nftNum * projects[pId_].nftAmt, "invalid amount");
@@ -183,7 +187,9 @@ contract FundRaise {
         tax                                         +=  upProjects[pId_].uNftFeeBack * number_;
         logNum[pId_][backer_]                       +=  number_;
         upProjects[pId_].uFunded                    +=  amount_ - (upProjects[pId_].uNftFeeBack * number_);
-        emit EAction(pId_, "fundLate", upProjects[pId_].uCreator, amount_);
+        upProjects[pId_].uNftNum                    +=  number_;
+        upProjects[pId_].uNftLimitBack              -=  number_;
+        emit EAction(pId_, "back", upProjects[pId_].uCreator, amount_);
     }
 
     /// backer
