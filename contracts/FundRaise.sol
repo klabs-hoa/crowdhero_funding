@@ -19,9 +19,11 @@ contract FundRaise {
         uint256 uPhDateEnd;
         uint    uStatus;        // 0=FUG, 1=PRS, 2=FID, 3=PEG, 4=CAL, 5=RED
         uint256 uFunded;        // save amount receive fund
+        uint256 uNftNum;
         uint256 uWidwable;      // amount creator can withdraw at this phase
         uint256 uNftAmtBack;
         uint256 uNftFeeBack;
+        uint256 uNftLimitBack;
     }
 
     struct Phase {
@@ -42,7 +44,7 @@ contract FundRaise {
     mapping(uint    => mapping(address  => uint))       public  logRefund;       // projectId    => backer   => amount
     mapping(uint    => mapping(uint256  => uint256))    public  logWithdraw;     // projectid    => date     => amount  
     
-    uint256                                             public  tax;             // tax of all project
+    uint256[]                                           public  taxes;             // tax of all project
     address                                             private _token;
     mapping(address => bool)                            private _operators;
     address                                             private _owner;
@@ -90,7 +92,8 @@ contract FundRaise {
         
         
         uint vProId             =   maxProjectId();
-        
+        taxes[vProId]           =   0;  
+
         for(uint vI =0; vI < duration_.length; vI++) {
             Phase memory vPha;
             vPha.duration       =   duration_[vI];
@@ -120,7 +123,7 @@ contract FundRaise {
         
         upProjects[pId_].uStatus                =   1;      // progress
         _updateProject(pId_, 1);
-        tax                                     +=  projects[pId_].tax;
+        taxes[pId_]                             +=  projects[pId_].tax;
         upProjects[pId_].uFunded                -=  projects[pId_].tax;
         emit EAction(pId_, "kickoff", upProjects[pId_].uCreator, upProjects[pId_].uPhDateEnd);
     }
@@ -165,24 +168,29 @@ contract FundRaise {
         logFund[pId_][backer_]                      +=  number_;
         logNum[pId_][backer_]                       +=  number_;
         upProjects[pId_].uFunded                    +=  amount_;
+        upProjects[pId_].uNftNum++;
+        taxes[pId_]                                 +=  amount_ - (proPhases[pId_][0].refundable * number_);
         emit EAction(pId_, "fund", upProjects[pId_].uCreator, amount_);
     }
 
-    function setBack( uint pId_, uint256 nftAmtLate_, uint256 nftFeeLate_) public chkOperator {
+    function setBack( uint pId_, uint256 nftAmtLate_, uint256 nftFeeLate_, uint256 nftLimitLate_) public chkOperator {
         upProjects[pId_].uNftAmtBack                = nftAmtLate_;
         upProjects[pId_].uNftFeeBack                = nftFeeLate_;
+        upProjects[pId_].uNftLimitBack              = nftLimitLate_;
     }
 
     function back( uint pId_, address backer_, uint256 amount_, uint number_) public {
-        require(upProjects[pId_].uNftAmtBack            >   0,          "invalid back");
-        require(upProjects[pId_].uStatus                <   3,          "invalid status");
+        require(upProjects[pId_].uNftLimitBack          >=  number_,    "invalid back");
+        require(upProjects[pId_].uStatus                <   2,          "invalid status");//fund or progress
         require(upProjects[pId_].uNftAmtBack * number_  ==  amount_,    "amount incorrect");
         require(upProjects[pId_].uFunded                >=  projects[pId_].nftNum * projects[pId_].nftAmt, "invalid amount");
         
         IERC20(_token).transferFrom(backer_, address(this), amount_);
-        tax                                         +=  upProjects[pId_].uNftFeeBack * number_;
+        taxes[pId_]                                 +=  upProjects[pId_].uNftFeeBack * number_;
         logNum[pId_][backer_]                       +=  number_;
         upProjects[pId_].uFunded                    +=  amount_ - (upProjects[pId_].uNftFeeBack * number_);
+        upProjects[pId_].uNftNum                    +=  number_;
+        upProjects[pId_].uNftLimitBack              -=  number_;
         emit EAction(pId_, "back", upProjects[pId_].uCreator, amount_);
     }
 
@@ -223,17 +231,21 @@ contract FundRaise {
     // owner
     function owGetTax() public {
         require( _owner     ==  msg.sender, "only for owner");
-        uint256 vTax        =   tax;
-        tax                 =   0;
+        uint256 vTax;
+        for(uint256 vI=0; vI< taxes.length;  vI++) {
+            if(upProjects[vI].uStatus  < 2) continue;
+            vTax        += taxes[vI];
+            taxes[vI]   = 0;
+        }
         IERC20(_token).transfer(msg.sender, vTax);
     }
     
     function owCloseProject( uint pId_) public {
         require( _owner     ==  msg.sender, "only for owner");
-        uint256 vBalance    =   upProjects[pId_].uWidwable + upProjects[pId_].uFunded + projects[pId_].tax;
+        uint256 vBalance    =   upProjects[pId_].uWidwable + upProjects[pId_].uFunded + taxes[pId_];
         upProjects[pId_].uWidwable      =   0; 
         upProjects[pId_].uFunded        =   0;
-        projects[pId_].tax              =   0;
+        taxes[pId_]                     =   0;
         upProjects[pId_].uStatus        =   4;  // cancel
         IERC20(_token).transfer(msg.sender, vBalance);
     }
