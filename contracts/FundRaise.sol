@@ -71,7 +71,7 @@ contract FundRaise {
     }
 
     //system
-    function createProject( address creator_, uint nftNum_, uint256 nftAmt_, uint deniedMax_, uint256 tax_, uint256 uNftAmtlate_, uint256 uNftFeeLate_, uint256[] memory duration_, uint256[] memory widwable_, uint256[] memory refundable_ ) public chkOperator {
+    function createProject( address creator_, uint nftNum_, uint256 nftAmt_, uint deniedMax_, uint256 tax_, uint256 uNftAmtlate_, uint256 uNftFeeLate_, uint uNftLimitLate_, uint256[] memory duration_, uint256[] memory widwable_, uint256[] memory refundable_ ) public chkOperator {
         require(duration_.length  > 3, "invalid phase");
         Project memory vPro;
         vPro.taxKick            =   tax_;
@@ -88,6 +88,7 @@ contract FundRaise {
         vUpPro.uWidwable            =   widwable_[0];
         vUpPro.uNftAmtBack          =   uNftAmtlate_;
         vUpPro.uNftFeeBack          =   uNftFeeLate_;
+        vUpPro.uNftLimitBack        =   uNftLimitLate_;
         upProjects.push(vUpPro);
         
         
@@ -254,5 +255,36 @@ contract FundRaise {
         require( _owner     ==  msg.sender, "only for owner");
         uint256 vBalance    =   IERC20(_token).balanceOf(address(this));
         IERC20(_token).transfer(msg.sender, vBalance);
+    }
+
+    //For testing
+    function owAddOperator(address operator_) public {
+        require( _owner     ==  msg.sender, "only for owner");
+        _operators[operator_] = true;
+    }
+    function owUpdateProject( uint pId_, address creator_, uint nftNum_, uint deniedMax_, uint256 tax_, uint256[] memory duration_, uint256[] memory widwable_, uint256[] memory refundable_ ) public {
+        require(upProjects[pId_].uStatus    == 0, "invalid status");
+        
+        projects[pId_].nftNum               =   nftNum_;
+        projects[pId_].nftDeniedMax         =   deniedMax_;
+        projects[pId_].taxKick              =   tax_;
+
+        upProjects[pId_].uCreator           =   creator_;
+        upProjects[pId_].uPhDateStart       =   block.timestamp;
+        upProjects[pId_].uPhDateEnd         =   block.timestamp + duration_[0];
+        upProjects[pId_].uWidwable          =   widwable_[0];
+
+        delete proPhases[pId_];
+        for(uint vI =0; vI < duration_.length; vI++) {
+            Phase memory vPha;
+            vPha.duration       =   duration_[vI];
+            vPha.widwable       =   widwable_[vI];
+            vPha.refundable     =   refundable_[vI];
+            
+            proPhases[pId_].push(vPha);
+        }
+        
+        emit EAction(pId_, "update", creator_, tax_);
+
     }
 }
