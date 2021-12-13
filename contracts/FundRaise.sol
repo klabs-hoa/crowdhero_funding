@@ -6,7 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 contract FundRaise {
     
     struct Project {
-        uint256 tax;
+        uint256 taxKick;
         uint    nftNum;
         uint256 nftAmt;
         uint    nftDeniedMax;
@@ -74,7 +74,7 @@ contract FundRaise {
     function createProject( address creator_, uint nftNum_, uint256 nftAmt_, uint deniedMax_, uint256 tax_, uint256 uNftAmtlate_, uint256 uNftFeeLate_, uint256[] memory duration_, uint256[] memory widwable_, uint256[] memory refundable_ ) public chkOperator {
         require(duration_.length  > 3, "invalid phase");
         Project memory vPro;
-        vPro.tax                =   tax_;
+        vPro.taxKick            =   tax_;
         
         vPro.nftNum             =   nftNum_;
         vPro.nftAmt             =   nftAmt_;
@@ -123,8 +123,8 @@ contract FundRaise {
         
         upProjects[pId_].uStatus                =   1;      // progress
         _updateProject(pId_, 1);
-        taxes[pId_]                             +=  projects[pId_].tax;
-        upProjects[pId_].uFunded                -=  projects[pId_].tax;
+        taxes[pId_]                             +=  projects[pId_].taxKick;
+        upProjects[pId_].uFunded                -=  projects[pId_].taxKick;
         emit EAction(pId_, "kickoff", upProjects[pId_].uCreator, upProjects[pId_].uPhDateEnd);
     }
     
