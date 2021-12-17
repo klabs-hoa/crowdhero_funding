@@ -93,7 +93,7 @@ contract FundRaise {
         
         
         uint vProId             =   maxProjectId();
-        taxes[vProId]           =   0;  
+        taxes.push(0);
 
         for(uint vI =0; vI < duration_.length; vI++) {
             Phase memory vPha;
@@ -171,7 +171,7 @@ contract FundRaise {
         upProjects[pId_].uFunded                    +=  amount_;
         upProjects[pId_].uNftNum++;
         taxes[pId_]                                 +=  amount_ - (proPhases[pId_][0].refundable * number_);
-        emit EAction(pId_, "fund", upProjects[pId_].uCreator, amount_);
+        emit EAction(pId_, "fund", backer_, amount_);
     }
 
     function setBack( uint pId_, uint256 nftAmtLate_, uint256 nftFeeLate_, uint256 nftLimitLate_) public chkOperator {
@@ -192,7 +192,7 @@ contract FundRaise {
         upProjects[pId_].uFunded                    +=  amount_ - (upProjects[pId_].uNftFeeBack * number_);
         upProjects[pId_].uNftNum                    +=  number_;
         upProjects[pId_].uNftLimitBack              -=  number_;
-        emit EAction(pId_, "back", upProjects[pId_].uCreator, amount_);
+        emit EAction(pId_, "back", backer_, amount_);
     }
 
     /// backer
@@ -204,7 +204,7 @@ contract FundRaise {
         logDenied[msg.sender][pId_]                 =   upProjects[pId_].uPhCurrent;
         logDeniedNo[pId_][phNo_]                    +=  logFund[pId_][msg.sender];
         if(logDeniedNo[pId_][phNo_]                 >=  projects[pId_].nftDeniedMax)    upProjects[pId_].uStatus          =   3;  //pendding
-        emit EAction(pId_, "deny", upProjects[pId_].uCreator, (upProjects[pId_].uFunded/projects[pId_].nftNum));
+        emit EAction(pId_, "deny", msg.sender, (upProjects[pId_].uFunded/projects[pId_].nftNum));
     }
     
     function refund( uint pId_) public {
@@ -216,7 +216,7 @@ contract FundRaise {
         logRefund[pId_][msg.sender]                 =   proPhases[pId_][ upProjects[pId_].uPhCurrent ].refundable * logNum[pId_][msg.sender];
         upProjects[pId_].uFunded                    -=  proPhases[pId_][ upProjects[pId_].uPhCurrent ].refundable * logNum[pId_][msg.sender];
         IERC20(_token).transfer(msg.sender, logRefund[pId_][msg.sender]);
-        emit EAction(pId_, "deny", upProjects[pId_].uCreator, (upProjects[pId_].uFunded/projects[pId_].nftNum)*logNum[pId_][msg.sender]);
+        emit EAction(pId_, "deny", msg.sender, (upProjects[pId_].uFunded/projects[pId_].nftNum)*logNum[pId_][msg.sender]);
     }
     // creator
     function withdraw( uint pId_) public {
@@ -226,7 +226,7 @@ contract FundRaise {
         logWithdraw[pId_][block.timestamp]          =   upProjects[pId_].uWidwable;
         upProjects[pId_].uWidwable                  =   0;
         IERC20(_token).transfer(msg.sender, logWithdraw[pId_][block.timestamp] );
-        emit EAction(pId_, "withdraw", upProjects[pId_].uCreator, logWithdraw[pId_][block.timestamp]);
+        emit EAction(pId_, "withdraw", msg.sender, logWithdraw[pId_][block.timestamp]);
     }
     
     // owner
