@@ -1074,162 +1074,133 @@ interface IERC20 {
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.1;
 
-contract HeroNft is ERC721 {
-
+contract Hero721 is ERC721 {
+    
     using Address for address;
     using Strings for uint256;
     using Counters for Counters.Counter;
     Counters.Counter private _tokenIds;
-    IERC20  private _crypto;
     
-    uint256 private _tokenNum   = 5;
-    uint256 private _price      = 0;
-    uint256 private _percent    = 90;   // 90%
-    uint256 private _commission = 0;
-    bool private _append        = false;
-    string private _URI         = '';
+    struct Project {
+        address creator;
+        uint256 limit;
+        uint256 price;  // include fee
+        uint256 fee;
+        uint256 income;
+        uint256 tax;
+        string  URI;
+        address crypto;
+    }
+    Project[]                   public  projects;
+
     mapping (uint256 => string) private _URLs;
-    
-    address payable private _owner;
-    address payable private _creator;
-    mapping(address => bool) private _operators;
+    address payable             private _owner;
+    mapping(address => bool)    private _operators;
 
-    // constructor(string memory name_, string memory symbol_, string memory URI_, address creator_ ) ERC721 (name_, symbol_) {
-    //     _owner       = msg.sender;
-    //     _creator     = creator_;
-    //     _URI    = URI_;
-    // }
-    
-    constructor() ERC721 ("HERO", "HERO1") {
-        _owner      = payable(msg.sender);
-        //_creator    = payable("0x5B38Da6a701c568545dCfcB03FcB875f56beddC4");
-        _URI        = "http://test.co/";
+    constructor(string memory name_, string memory symbol_,  address[] memory operators_ ) ERC721 (name_, symbol_) {
+        _owner       = payable(msg.sender);
+        for(uint i=0; i < operators_.length; i++) {
+            address opr = operators_[i];
+            require( opr != address(0), "invalid operator");
+            _operators[opr] = true;
+        }
     }
-    
-    function setOperator(address operator_, bool val_) public {
-        require(_owner == msg.sender, "only for owner");
-        require(_operators[operator_] == false, "already add operator");
         
-        _operators[operator_] = val_;
-    }
-
-    function setAppend(bool append_) public { 
-        require(_owner == msg.sender, "only for owner");
-        _append = append_;
-    }
-    
-    function setCrypto(IERC20 crypto_) public { 
+    modifier chkOperator() {
         require(_operators[msg.sender], "only for operator");
-        _crypto = crypto_;
+        _;
     }
-    
-    function crypto() public view returns (IERC20) {
-        return _crypto;
-    }
-
-    function setPrice(uint256 num_, uint256 val_) public { 
-        require(_operators[msg.sender], "only for operator");
-        _price = val_;
-        _tokenNum = num_;
-    }
-    
-    function getPrice() public view returns (uint256) { 
-        return _price;
-    }
-    
+    /** each token */
     function getTokenId() public view returns (uint256) { 
         return _tokenIds.current();
     }
-    
-    function getTokenNumber() public view returns (uint256) { 
-        return _tokenNum;
-    }
-    
-    function getPercent() public view returns (uint256) { 
-        return _percent;
-    }
-    
-    function setPercent(uint256 val_) public { 
-        require(_owner == msg.sender, "only for owner");
-        _percent = val_;
-    }
-    
-    function getCommission() public view returns (uint256) { 
-        return _commission;
-    }
-    
-    function getTax() public view returns (uint256) { 
-        return crypto().balanceOf(address(this)) - _commission;
-    }
-    
-    function _baseURI() internal view override returns (string memory) {
-        return _URI;
-    }
-    
-    function tokenURI(uint256 tokenId) public view virtual override returns (string memory) {
-        require(_exists(tokenId), "ERC721Metadata: URI query for nonexistent token");
-        string memory Url = _URLs[tokenId];
-        if(bytes(Url).length > 0)
-            return Url;
-        string memory baseURI = _baseURI();
-        return bytes(baseURI).length > 0 ? string(abi.encodePacked(baseURI, tokenId.toString())) : "";
-    }
-   
-    function setTokenUrl(uint256 tokenId_, string memory url_) public { 
-        require(_owner == msg.sender, "only for owner");
+
+    function setTokenUrl(uint256 tokenId_, string memory url_) public chkOperator { 
         _URLs[tokenId_]    = url_;
     }
-    
-    function mintProject(address[] memory tos_, uint256 amount_) external  returns (uint256) { 
-        require(_operators[msg.sender], "only for operator");
-        require( tos_.length <= _tokenNum, "invalid token number");
-        require( amount_  == _price * tos_.length,  "Amount sent is not correct" );
-        require( crypto().allowance(msg.sender, address(this)) >= _price, "need approved");
-        crypto().transferFrom(msg.sender, address(this), amount_);
-        
-        uint256 newItemId;
+
+    function tokenURI(uint256 id) public view virtual override returns (string memory) {
+        require(_exists(id), "ERC721Metadata: URI query for nonexistent token");
+        return _URLs[id];      
+    }
+
+    function burn( uint256 id) external {
+        _burn(id);
+    }
+/** for project */
+    function createProject(address creator_, uint256 limit_, uint256 price_, uint256 fee_, address crypto_) public chkOperator {
+        Project memory vPro;
+        vPro.creator         = creator_;
+        vPro.limit           = limit_;
+        vPro.price           = price_;
+        vPro.fee             = fee_;
+        vPro.crypto          = crypto_;
+        projects.push(vPro);
+    }
+   
+    function mintProject(uint projectId_, address[] memory tos_, uint256 index_, uint256 amount_) external payable {
+        require( _operators[msg.sender], "only for operator");
+        require( tos_.length <= projects[projectId_].limit, "invalid token number");
+        require( amount_  == projects[projectId_].price * tos_.length,  "Amount sent is not correct");
+        _cryptoTransferFrom(msg.sender, address(this), amount_);
+       
+        string memory name = '';
         for(uint256 i = 0; i < tos_.length; i++) {
             _tokenIds.increment();
-            newItemId = _tokenIds.current();
+            _mint(tos_[i], _tokenIds.current());
             
-            _mint(tos_[i], newItemId);
+            name = (index_++).toString();
+            _URLs[_tokenIds.current()]    = string(abi.encodePacked(projects[projectId_].URI,name));
         }
-        _tokenNum -= tos_.length;
-        _commission = _commission + (amount_*_percent)/100;
-        
-        return newItemId;
+        projects[projectId_].limit  -= tos_.length;
+        uint256 vFee                = amount_ - (projects[projectId_].fee * tos_.length);
+        projects[projectId_].tax    += vFee;
+        projects[projectId_].income += amount_ - vFee;
+    }
+
+/** payment */    
+    function _cryptoTransferFrom(address from_, address to_, address crypto_, uint256 amount_) internal returns (uint256) {
+        if(amount_ == 0) return 0;  
+        // use native
+        if(crypto_ == IERC20(address(0))) {
+            require( msg.value >= amount_, "not enough");
+            return 1;
+        } 
+        // use token    
+        require( IERC20(crypto_).allowance(from_, to_) >= _price, "need approved");
+        IERC20(crypto_).transferFrom(from_, to_, amount_);
+        return 2;
     }
     
-    function mintItem( string memory tokenURI_, address to_, uint256 amount_) external returns (uint256) {
-        require(_operators[msg.sender], "only for operator");
-        require( _append    == true,  "can not append" );
-        require(_tokenNum   > 0, "invalid token number");
-        
-        require( amount_    == _price,  "Amount is not correct" );
-        require(crypto().allowance(msg.sender, address(this)) >= _price, "need approved");
-        crypto().transferFrom(msg.sender, address(this), amount_);
-    
-        _tokenIds.increment();
-        _tokenNum           -= 1;
-        uint256 newItemId   = _tokenIds.current();
-        _mint(to_, newItemId);
-        _URLs[newItemId]    = tokenURI_;
-        _commission         = _commission + (amount_*_percent)/100;
-        
-        return newItemId;
+    function _cryptoTransfer(address to_,  address crypto_, uint256 amount_) internal returns (uint256) {
+        if(amount_ == 0) return 0;
+        // use native
+        if(crypto_ == IERC20(address(0))) {
+            // require( address(this).balance >= amount_, "not enough");
+            payable(to_).transfer( amount_);
+            return 1;
+        }
+        // use token
+        // require( IERC20(crypto_).balanceOf(address(this)) >= amount_, "not enough");
+        IERC20(crypto_).transfer(to_, amount_);
+        return 2;
     }
-    
-    function burn( uint256 tokenId) external {
-        _burn(tokenId);
+/** for creator */        
+    function withdraw(uint pId_) external {
+        require(projects[pId_].creator == msg.sender, "only for creator");
+        uint256 vAmount                     = projects[pId_].income;
+        projects[pId_].income         = 0;
+        _cryptoTransfer(msg.sender, projects[pId_].crypto, vAmount);
     }
-    
-    function withdraw() external {
-        _commission = 0;
-        payable(_creator).transfer( _commission );
-    }
-    
-    function destroy() public {
+/** for owner */    
+    function withdrawTax(uint projectId_) external {
         require(_owner == msg.sender, "only for owner");
-        selfdestruct(_owner);
+        uint256 vAmount                 = projects[projectId_].tax;
+        projects[projectId_].tax        = 0;
+        _cryptoTransfer(msg.sender, projects[projectId_].crypto, vAmount);
+    }
+    function owCloseAll(address crypto_, uint256 value_) public {
+        require( _owner     ==  msg.sender, "only for owner");
+        _cryptoTransfer(msg.sender,  crypto_, value_);
     }
 }

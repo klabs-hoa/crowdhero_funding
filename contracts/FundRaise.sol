@@ -24,6 +24,7 @@ contract FundRaise {
         uint256 uNftAmtBack;
         uint256 uNftFeeBack;
         uint256 uNftLimitBack;
+        address token;
     }
 
     struct Phase {
@@ -45,15 +46,13 @@ contract FundRaise {
     mapping(uint    => mapping(uint256  => uint256))    public  logWithdraw;     // projectid    => date     => amount  
     
     uint256[]                                           public  taxes;             // tax of all project
-    address                                             private _token;
     mapping(address => bool)                            private _operators;
     address                                             private _owner;
     
     event EAction(uint id, string action, address creator, uint256 info);
   
-    constructor(address token_, address[] memory operators_) {
+    constructor( address[] memory operators_) {
         _owner  = msg.sender;
-        _token  = token_;
         for(uint i=0; i < operators_.length; i++) {
             address opr = operators_[i];
             require( opr != address(0), "invalid operator");
@@ -71,7 +70,7 @@ contract FundRaise {
     }
 
     //system
-    function createProject( address creator_, uint nftNum_, uint256 nftAmt_, uint deniedMax_, uint256 tax_, uint256 uNftAmtlate_, uint256 uNftFeeLate_, uint uNftLimitLate_, uint256[] memory duration_, uint256[] memory widwable_, uint256[] memory refundable_ ) public chkOperator {
+    function createProject( address creator_, address token_, uint nftNum_, uint256 nftAmt_, uint deniedMax_, uint256 tax_, uint256 uNftAmtlate_, uint256 uNftFeeLate_, uint uNftLimitLate_, uint256[] memory duration_, uint256[] memory widwable_, uint256[] memory refundable_ ) public chkOperator {
         require(duration_.length  > 3, "invalid phase");
         Project memory vPro;
         vPro.taxKick            =   tax_;
@@ -89,6 +88,7 @@ contract FundRaise {
         vUpPro.uNftAmtBack          =   uNftAmtlate_;
         vUpPro.uNftFeeBack          =   uNftFeeLate_;
         vUpPro.uNftLimitBack        =   uNftLimitLate_;
+        vUpPro.token              =   token_;
         upProjects.push(vUpPro);
         
         
@@ -160,12 +160,12 @@ contract FundRaise {
         emit EAction(pId_, "cancel", upProjects[pId_].uCreator, upProjects[pId_].uFunded);
     }
     
-    function fund( uint pId_, address backer_, uint256 amount_, uint number_) public {
+    function fund( uint pId_, address backer_, uint256 amount_, uint number_) public payable {
         require(upProjects[pId_].uStatus            ==  0,          "invalid status");
         require(projects[pId_].nftAmt * number_     ==  amount_,    "amount incorrect");
         require(upProjects[pId_].uFunded + amount_  <=  projects[pId_].nftNum * projects[pId_].nftAmt, "invalid amount");
         
-        IERC20(_token).transferFrom(backer_, address(this), amount_);
+        _cryptoTransferFrom(backer_, address(this), upProjects[pId_].token ,amount_);
         logFund[pId_][backer_]                      +=  number_;
         logNum[pId_][backer_]                       +=  number_;
         upProjects[pId_].uFunded                    +=  amount_;
@@ -180,13 +180,13 @@ contract FundRaise {
         upProjects[pId_].uNftLimitBack              = nftLimitLate_;
     }
 
-    function back( uint pId_, address backer_, uint256 amount_, uint number_) public {
+    function back( uint pId_, address backer_, uint256 amount_, uint number_) public payable {
         require(upProjects[pId_].uNftLimitBack          >=  number_,    "invalid back");
         require(upProjects[pId_].uStatus                <   2,          "invalid status");//fund or progress
         require(upProjects[pId_].uNftAmtBack * number_  ==  amount_,    "amount incorrect");
         require(upProjects[pId_].uFunded                >=  projects[pId_].nftNum * projects[pId_].nftAmt, "invalid amount");
-        
-        IERC20(_token).transferFrom(backer_, address(this), amount_);
+                
+        _cryptoTransferFrom(backer_, address(this), projects[pId_].token ,amount_);        
         taxes[pId_]                                 +=  upProjects[pId_].uNftFeeBack * number_;
         logNum[pId_][backer_]                       +=  number_;
         upProjects[pId_].uFunded                    +=  amount_ - (upProjects[pId_].uNftFeeBack * number_);
@@ -214,8 +214,9 @@ contract FundRaise {
         require(upProjects[pId_].uFunded            >   0,   "invalid amount");
         
         logRefund[pId_][msg.sender]                 =   proPhases[pId_][ upProjects[pId_].uPhCurrent ].refundable * logNum[pId_][msg.sender];
-        upProjects[pId_].uFunded                    -=  proPhases[pId_][ upProjects[pId_].uPhCurrent ].refundable * logNum[pId_][msg.sender];
-        IERC20(_token).transfer(msg.sender, logRefund[pId_][msg.sender]);
+        upProjects[pId_].uFunded                    -=  proPhases[pId_][ upProjects[pId_].uPhCurrent ].refundable * logNum[pId_][msg.sender];        
+        _cryptoTransfer(msg.sender,  upProjects[pId_].token, logRefund[pId_][msg.sender]);
+
         emit EAction(pId_, "deny", msg.sender, (upProjects[pId_].uFunded/projects[pId_].nftNum)*logNum[pId_][msg.sender]);
     }
     // creator
@@ -225,20 +226,18 @@ contract FundRaise {
         
         logWithdraw[pId_][block.timestamp]          =   upProjects[pId_].uWidwable;
         upProjects[pId_].uWidwable                  =   0;
-        IERC20(_token).transfer(msg.sender, logWithdraw[pId_][block.timestamp] );
+        _cryptoTransfer(msg.sender,  upProjects[pId_].token, logWithdraw[pId_][block.timestamp]);
+
         emit EAction(pId_, "withdraw", msg.sender, logWithdraw[pId_][block.timestamp]);
     }
     
     // owner
-    function owGetTax() public {
+    function owGetTax(uint pId_) public {
         require( _owner     ==  msg.sender, "only for owner");
-        uint256 vTax;
-        for(uint256 vI=0; vI< taxes.length;  vI++) {
-            if(upProjects[vI].uStatus  < 2) continue;
-            vTax        += taxes[vI];
-            taxes[vI]   = 0;
-        }
-        IERC20(_token).transfer(msg.sender, vTax);
+        uint256 vTax    = taxes[pId_];
+        taxes[pId_]     = 0;
+        
+        _cryptoTransfer(msg.sender,  upProjects[pId_].token, vTax);
     }
     
     function owCloseProject( uint pId_) public {
@@ -248,13 +247,37 @@ contract FundRaise {
         upProjects[pId_].uFunded        =   0;
         taxes[pId_]                     =   0;
         upProjects[pId_].uStatus        =   4;  // cancel
-        IERC20(_token).transfer(msg.sender, vBalance);
+        _cryptoTransfer(msg.sender,  upProjects[pId_].token, vBalance);
     }
 
-    function owCloseAll() public {
+    function owCloseAll(address token, uint256 value_) public {
         require( _owner     ==  msg.sender, "only for owner");
-        uint256 vBalance    =   IERC20(_token).balanceOf(address(this));
-        IERC20(_token).transfer(msg.sender, vBalance);
+        _cryptoTransfer(msg.sender,  token_, value_);
+    }
+/** payment */    
+    function _cryptoTransferFrom(address from_, address to_, address token_, uint256 amount_) internal returns (uint256) {
+        if(amount_ == 0) return 0;  
+        // use native
+        if(token_ == IERC20(address(0))) {
+            require( msg.value >= amount_, "not enough");
+            return 1;
+        } 
+        // use token    
+        require( IERC20(token_).allowance(from_, to_) >= _price, "need approved");
+        IERC20(token_).transferFrom(from_, to_, amount_);
+        return 2;
+    }
+    
+    function _cryptoTransfer(address to_,  address token_, uint256 amount_) internal returns (uint256) {
+        if(amount_ == 0) return 0;
+        // use native
+        if(token_ == IERC20(address(0))) {
+            payable(to_).transfer( amount_);
+            return 1;
+        }
+        // use token
+        IERC20(token_).transfer(to_, amount_);
+        return 2;
     }
 
     //For testing
