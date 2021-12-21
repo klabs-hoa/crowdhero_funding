@@ -68,7 +68,7 @@ contract Hero721 is ERC721 {
         projects.push(vPro);
     }
    
-    function mintProject(uint projectId_, address[] memory tos_, uint256 index_, uint256 amount_) external payable {
+    function mintProject(uint projectId_, address[] memory tos_, uint256 index_, uint256 amount_) external payable chkOperator {
         require( _operators[msg.sender], "only for operator");
         require( tos_.length <= projects[projectId_].limit, "invalid token number");
         require( amount_  == projects[projectId_].price * tos_.length,  "Amount sent is not correct");

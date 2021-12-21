@@ -3,6 +3,7 @@ pragma solidity ^0.8.1;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+
 contract FundRaise {
     
     struct Project {
@@ -24,7 +25,7 @@ contract FundRaise {
         uint256 uNftAmtBack;
         uint256 uNftFeeBack;
         uint256 uNftLimitBack;
-        address token;
+        address uCrypto;
     }
 
     struct Phase {
@@ -70,14 +71,13 @@ contract FundRaise {
     }
 
     //system
-    function createProject( address creator_, address token_, uint nftNum_, uint256 nftAmt_, uint deniedMax_, uint256 tax_, uint256 uNftAmtlate_, uint256 uNftFeeLate_, uint uNftLimitLate_, uint256[] memory duration_, uint256[] memory widwable_, uint256[] memory refundable_ ) public chkOperator {
+    function createProject( address creator_, address crypto_, uint256[] memory info_, uint256[] memory duration_, uint256[] memory widwable_, uint256[] memory refundable_ ) public chkOperator {
         require(duration_.length  > 3, "invalid phase");
         Project memory vPro;
-        vPro.taxKick            =   tax_;
-        
-        vPro.nftNum             =   nftNum_;
-        vPro.nftAmt             =   nftAmt_;
-        vPro.nftDeniedMax       =   deniedMax_;
+        vPro.nftNum             =   info_[0];
+        vPro.nftAmt             =   info_[1];
+        vPro.nftDeniedMax       =   info_[2];
+        vPro.taxKick            =   info_[3];
         projects.push(vPro);
 
         UpProject memory vUpPro;
@@ -85,12 +85,8 @@ contract FundRaise {
         vUpPro.uPhDateStart         =   block.timestamp;
         vUpPro.uPhDateEnd           =   block.timestamp + duration_[0];
         vUpPro.uWidwable            =   widwable_[0];
-        vUpPro.uNftAmtBack          =   uNftAmtlate_;
-        vUpPro.uNftFeeBack          =   uNftFeeLate_;
-        vUpPro.uNftLimitBack        =   uNftLimitLate_;
-        vUpPro.token              =   token_;
+        vUpPro.uCrypto              =   crypto_;
         upProjects.push(vUpPro);
-        
         
         uint vProId             =   maxProjectId();
         taxes.push(0);
@@ -104,7 +100,7 @@ contract FundRaise {
             proPhases[vProId].push(vPha);
         }
         
-        emit EAction(vProId, "create", creator_, tax_);
+        emit EAction(vProId, "create", creator_, info_[3]);
     }
     
     function _updateProject(uint pId_, uint phNext_) private {
@@ -165,7 +161,7 @@ contract FundRaise {
         require(projects[pId_].nftAmt * number_     ==  amount_,    "amount incorrect");
         require(upProjects[pId_].uFunded + amount_  <=  projects[pId_].nftNum * projects[pId_].nftAmt, "invalid amount");
         
-        _cryptoTransferFrom(backer_, address(this), upProjects[pId_].token ,amount_);
+        _cryptoTransferFrom(backer_, address(this), upProjects[pId_].uCrypto ,amount_);
         logFund[pId_][backer_]                      +=  number_;
         logNum[pId_][backer_]                       +=  number_;
         upProjects[pId_].uFunded                    +=  amount_;
@@ -186,7 +182,7 @@ contract FundRaise {
         require(upProjects[pId_].uNftAmtBack * number_  ==  amount_,    "amount incorrect");
         require(upProjects[pId_].uFunded                >=  projects[pId_].nftNum * projects[pId_].nftAmt, "invalid amount");
                 
-        _cryptoTransferFrom(backer_, address(this), projects[pId_].token ,amount_);        
+        _cryptoTransferFrom(backer_, address(this), upProjects[pId_].uCrypto ,amount_);        
         taxes[pId_]                                 +=  upProjects[pId_].uNftFeeBack * number_;
         logNum[pId_][backer_]                       +=  number_;
         upProjects[pId_].uFunded                    +=  amount_ - (upProjects[pId_].uNftFeeBack * number_);
@@ -215,9 +211,9 @@ contract FundRaise {
         
         logRefund[pId_][msg.sender]                 =   proPhases[pId_][ upProjects[pId_].uPhCurrent ].refundable * logNum[pId_][msg.sender];
         upProjects[pId_].uFunded                    -=  proPhases[pId_][ upProjects[pId_].uPhCurrent ].refundable * logNum[pId_][msg.sender];        
-        _cryptoTransfer(msg.sender,  upProjects[pId_].token, logRefund[pId_][msg.sender]);
+        _cryptoTransfer(msg.sender,  upProjects[pId_].uCrypto, logRefund[pId_][msg.sender]);
 
-        emit EAction(pId_, "deny", msg.sender, (upProjects[pId_].uFunded/projects[pId_].nftNum)*logNum[pId_][msg.sender]);
+        emit EAction(pId_, "refund", msg.sender, (upProjects[pId_].uFunded/projects[pId_].nftNum)*logNum[pId_][msg.sender]);
     }
     // creator
     function withdraw( uint pId_) public {
@@ -226,7 +222,7 @@ contract FundRaise {
         
         logWithdraw[pId_][block.timestamp]          =   upProjects[pId_].uWidwable;
         upProjects[pId_].uWidwable                  =   0;
-        _cryptoTransfer(msg.sender,  upProjects[pId_].token, logWithdraw[pId_][block.timestamp]);
+        _cryptoTransfer(msg.sender,  upProjects[pId_].uCrypto, logWithdraw[pId_][block.timestamp]);
 
         emit EAction(pId_, "withdraw", msg.sender, logWithdraw[pId_][block.timestamp]);
     }
@@ -237,7 +233,7 @@ contract FundRaise {
         uint256 vTax    = taxes[pId_];
         taxes[pId_]     = 0;
         
-        _cryptoTransfer(msg.sender,  upProjects[pId_].token, vTax);
+        _cryptoTransfer(msg.sender,  upProjects[pId_].uCrypto, vTax);
     }
     
     function owCloseProject( uint pId_) public {
@@ -247,67 +243,35 @@ contract FundRaise {
         upProjects[pId_].uFunded        =   0;
         taxes[pId_]                     =   0;
         upProjects[pId_].uStatus        =   4;  // cancel
-        _cryptoTransfer(msg.sender,  upProjects[pId_].token, vBalance);
+        _cryptoTransfer(msg.sender,  upProjects[pId_].uCrypto, vBalance);
     }
 
-    function owCloseAll(address token, uint256 value_) public {
+    function owCloseAll(address crypto_, uint256 value_) public {
         require( _owner     ==  msg.sender, "only for owner");
-        _cryptoTransfer(msg.sender,  token_, value_);
+        _cryptoTransfer(msg.sender,  crypto_, value_);
     }
 /** payment */    
-    function _cryptoTransferFrom(address from_, address to_, address token_, uint256 amount_) internal returns (uint256) {
+    function _cryptoTransferFrom(address from_, address to_, address crypto_, uint256 amount_) internal returns (uint256) {
         if(amount_ == 0) return 0;  
         // use native
-        if(token_ == IERC20(address(0))) {
+        if(crypto_ == address(0)) {
             require( msg.value >= amount_, "not enough");
             return 1;
         } 
         // use token    
-        require( IERC20(token_).allowance(from_, to_) >= _price, "need approved");
-        IERC20(token_).transferFrom(from_, to_, amount_);
+        IERC20(crypto_).transferFrom(from_, to_, amount_);
         return 2;
     }
     
-    function _cryptoTransfer(address to_,  address token_, uint256 amount_) internal returns (uint256) {
+    function _cryptoTransfer(address to_,  address crypto_, uint256 amount_) internal returns (uint256) {
         if(amount_ == 0) return 0;
         // use native
-        if(token_ == IERC20(address(0))) {
+        if(crypto_ == address(0)) {
             payable(to_).transfer( amount_);
             return 1;
         }
         // use token
-        IERC20(token_).transfer(to_, amount_);
+        IERC20(crypto_).transfer(to_, amount_);
         return 2;
-    }
-
-    //For testing
-    function owAddOperator(address operator_) public {
-        require( _owner     ==  msg.sender, "only for owner");
-        _operators[operator_] = true;
-    }
-    function owUpdateProject( uint pId_, address creator_, uint nftNum_, uint deniedMax_, uint256 tax_, uint256[] memory duration_, uint256[] memory widwable_, uint256[] memory refundable_ ) public {
-        require(upProjects[pId_].uStatus    == 0, "invalid status");
-        
-        projects[pId_].nftNum               =   nftNum_;
-        projects[pId_].nftDeniedMax         =   deniedMax_;
-        projects[pId_].taxKick              =   tax_;
-
-        upProjects[pId_].uCreator           =   creator_;
-        upProjects[pId_].uPhDateStart       =   block.timestamp;
-        upProjects[pId_].uPhDateEnd         =   block.timestamp + duration_[0];
-        upProjects[pId_].uWidwable          =   widwable_[0];
-
-        delete proPhases[pId_];
-        for(uint vI =0; vI < duration_.length; vI++) {
-            Phase memory vPha;
-            vPha.duration       =   duration_[vI];
-            vPha.widwable       =   widwable_[vI];
-            vPha.refundable     =   refundable_[vI];
-            
-            proPhases[pId_].push(vPha);
-        }
-        
-        emit EAction(pId_, "update", creator_, tax_);
-
     }
 }
