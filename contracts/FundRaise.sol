@@ -255,7 +255,7 @@ contract FundRaise {
         if(amount_ == 0) return 0;  
         // use native
         if(crypto_ == address(0)) {
-            require( msg.value >= amount_, "not enough");
+            require( msg.value == amount_, "invalid amount");
             return 1;
         } 
         // use token    
