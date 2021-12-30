@@ -165,7 +165,7 @@ contract FundRaise {
         logFund[pId_][backer_]                      +=  number_;
         logNum[pId_][backer_]                       +=  number_;
         upProjects[pId_].uFunded                    +=  amount_;
-        upProjects[pId_].uNftNum++;
+        upProjects[pId_].uNftNum                    +=  number_;
         taxes[pId_]                                 +=  amount_ - (proPhases[pId_][0].refundable * number_);
         emit EAction(pId_, "fund", backer_, amount_);
     }
