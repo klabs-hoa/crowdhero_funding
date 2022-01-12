@@ -3,7 +3,6 @@ pragma solidity ^0.8.1;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-
 contract FundRaise {
     struct Project {
         uint256 taxKick;
@@ -26,6 +25,7 @@ contract FundRaise {
         address uCrypto;
     }
     struct Phase {
+        uint256 phaseStart;
         uint    duration;
         uint256 widwable;
         uint256 refundable;
@@ -34,7 +34,6 @@ contract FundRaise {
     Project[]                                           public  projects;
     UpProject[]                                         public  upProjects;
     mapping(uint    => Phase[])                         public  proPhases;       // projectid    => phases[]
-    mapping(uint    => uint256[])                       public  proPhaseStart;   // projectid    => startDate[]
     
     mapping(uint    => mapping(address  => uint256))    public  logFund;         // projectid    => early   => number NFT
     mapping(uint    => mapping(address  => uint256))    public  logNum;          // projectid    => backer  => number NFT
@@ -64,8 +63,8 @@ contract FundRaise {
     function maxProjectId() public view returns(uint256) {
         return projects.length - 1;
     }
-    function getPhaseStart(uint pId_) public view returns(uint256[] memory) {
-        return proPhaseStart[pId_];
+    function getPhaseStart(uint pId_) public view returns(Phase[] memory) {
+        return proPhases[pId_];
     }
     //system
     function opCreateProject( address creator_, address crypto_, uint nftNum_, uint256 nftAmt_, uint deniedMax_, uint256 tax_, uint256[] memory duration_, uint256[] memory widwable_, uint256[] memory refundable_ ) public chkOperator {
@@ -88,11 +87,11 @@ contract FundRaise {
         taxes.push(0);
         for(uint vI =0; vI < duration_.length; vI++) {
             Phase memory vPha;
+            vPha.phaseStart     =   vPhaseStart;
             vPha.duration       =   duration_[vI];
             vPha.widwable       =   widwable_[vI];
             vPha.refundable     =   refundable_[vI];
             proPhases[vProId].push(vPha);
-            proPhaseStart[vProId].push(vPhaseStart);
             vPhaseStart         +=  vPha.duration;
         }
         emit EAction(vProId, "create", creator_, tax_);
@@ -105,7 +104,8 @@ contract FundRaise {
         upProjects[pId_].uPhDateStart           =    block.timestamp;
         upProjects[pId_].uPhDateEnd             +=   proPhases[pId_][phNext_].duration;
         upProjects[pId_].uPhCurrent             =    phNext_;
-        proPhaseStart[pId_][phNext_]            =    block.timestamp;
+
+        proPhases[pId_][phNext_].phaseStart     =    block.timestamp;
     }
     function opKickoff(uint pId_) public chkOperator {
         require(upProjects[pId_].uStatus        ==  0,  "ivd status");
