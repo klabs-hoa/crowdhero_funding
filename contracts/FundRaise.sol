@@ -9,42 +9,46 @@ contract FundRaise {
         uint    nftNum;
         uint256 nftAmt;
         uint    nftDeniedMax;
+        address creator;
+        address crypto;
     }
     struct UpProject {
-        address uCreator;
+        Project Init;
         uint    uPhCurrent;
-        uint256 uPhDateStart;
-        uint256 uPhDateEnd;
+        uint    uPhDateStart;
+        uint    uPhDateEnd;
         uint    uStatus;        // 0=FUG, 1=PRS, 2=FID, 3=PEG, 4=CAL, 5=RED
         uint256 uFunded;        // save amount receive fund
-        uint256 uNftNum;
+        uint    uNftNum;
         uint256 uWidwable;      // amount creator can withdraw at this phase
+    }
+    struct BackProject {
         uint256 uNftAmtBack;
         uint256 uNftFeeBack;
-        uint256 uNftLimitBack;
-        address uCrypto;
+        uint    uNftLimitBack;
     }
     struct Phase {
-        uint256 phaseStart;
+        uint    phaseStart;
         uint    duration;
         uint256 widwable;
         uint256 refundable;
         string  uPath;
     }
-    Project[]                                           public  projects;
-    UpProject[]                                         public  upProjects;
+    UpProject[]                                         public  projs;
+    mapping(uint    => BackProject)                     public  bkProjs;
     mapping(uint    => Phase[])                         public  proPhases;       // projectid    => phases[]
     
-    mapping(uint    => mapping(address  => uint256))    public  logFund;         // projectid    => early   => number NFT
-    mapping(uint    => mapping(address  => uint256))    public  logNum;          // projectid    => backer  => number NFT
+    mapping(uint    => mapping(address  => uint))       public  logFund;         // projectid    => early   => number NFT
+    mapping(uint    => mapping(address  => uint))       public  logNum;          // projectid    => backer  => number NFT
     mapping(address => mapping(uint     => uint))       public  logDenied;       // backer       => projectid=> phaseId
     mapping(uint    => mapping(uint     => uint))       public  logDeniedNo;     // projectid    => phaseId  => number denied
-    mapping(uint    => mapping(address  => uint))       public  logRefund;       // projectId    => backer   => amount
+    mapping(uint    => mapping(address  => uint256))    public  logRefund;       // projectId    => backer   => amount
     mapping(uint    => mapping(uint256  => uint256))    public  logWithdraw;     // projectid    => date     => amount  
     
     uint256[]                                           public  taxes;             // tax of all project
     mapping(address => bool)                            private _operators;
     address                                             private _owner;
+    bool                                                private _ownerLock = true;
     
     event EAction(uint id, string action, address creator, uint256 info);
   
@@ -60,30 +64,33 @@ contract FundRaise {
         require(_operators[msg.sender], "only for optor");
         _;
     }
-    function maxProjectId() public view returns(uint256) {
-        return projects.length - 1;
+    modifier chkOwnerLock() {
+        require( _owner     ==  msg.sender, "only for owner");
+        require( _ownerLock ==  false, "lock not open");
+        _;
+    }
+    function maxProjectId() public view returns(uint) {
+        return projs.length - 1;
     }
     function getPhaseStart(uint pId_) public view returns(Phase[] memory) {
         return proPhases[pId_];
     }
     //system
-    function opCreateProject( address creator_, address crypto_, uint nftNum_, uint256 nftAmt_, uint deniedMax_, uint256 tax_, uint256[] memory duration_, uint256[] memory widwable_, uint256[] memory refundable_ ) public chkOperator {
+    function opCreateProject( address creator_, address crypto_, uint nftNum_, uint256 nftAmt_, uint deniedMax_, uint256 tax_, uint[] memory duration_, uint256[] memory widwable_, uint256[] memory refundable_ ) public chkOperator {
         require(duration_.length  > 3, "ivd phase");
-        Project memory vPro;
-        vPro.taxKick            =   tax_;
-        vPro.nftNum             =   nftNum_;
-        vPro.nftAmt             =   nftAmt_;
-        vPro.nftDeniedMax       =   deniedMax_;
-        projects.push(vPro);
-        uint256 vPhaseStart         = block.timestamp;
+     
+        uint vPhaseStart        = block.timestamp;
         UpProject memory vUpPro;
-        vUpPro.uCreator             =   creator_;
+        vUpPro.Init.taxKick         =   tax_;
+        vUpPro.Init.nftNum          =   nftNum_;
+        vUpPro.Init.nftAmt          =   nftAmt_;
+        vUpPro.Init.nftDeniedMax    =   deniedMax_;
+        vUpPro.Init.crypto          =   crypto_;
+        vUpPro.Init.creator         =   creator_;
         vUpPro.uPhDateStart         =   vPhaseStart;
         vUpPro.uPhDateEnd           =   vPhaseStart + duration_[0];
         vUpPro.uWidwable            =   widwable_[0];
-        vUpPro.uCrypto              =   crypto_;
-        upProjects.push(vUpPro);
-        uint vProId             =   maxProjectId();
+        projs.push(vUpPro);
         taxes.push(0);
         for(uint vI =0; vI < duration_.length; vI++) {
             Phase memory vPha;
@@ -91,130 +98,127 @@ contract FundRaise {
             vPha.duration       =   duration_[vI];
             vPha.widwable       =   widwable_[vI];
             vPha.refundable     =   refundable_[vI];
-            proPhases[vProId].push(vPha);
+            proPhases[maxProjectId()].push(vPha);
             vPhaseStart         +=  vPha.duration;
         }
-        emit EAction(vProId, "create", creator_, tax_);
+        emit EAction(maxProjectId(), "create", creator_, tax_);
     }
     function _updateProject(uint pId_, uint phNext_) private {
-        require(upProjects[pId_].uPhDateEnd     >  block.timestamp, "ivd deadline");
-        require(upProjects[pId_].uPhDateStart + (proPhases[pId_][phNext_-1].duration/2)   <  block.timestamp, "ivd start");
-        upProjects[pId_].uWidwable              +=   proPhases[pId_][phNext_].widwable;
-        upProjects[pId_].uFunded                -=   proPhases[pId_][phNext_].widwable;
-        upProjects[pId_].uPhDateStart           =    block.timestamp;
-        upProjects[pId_].uPhDateEnd             +=   proPhases[pId_][phNext_].duration;
-        upProjects[pId_].uPhCurrent             =    phNext_;
+        require( projs[pId_].uPhDateEnd     >  block.timestamp, "ivd deadline");
+        require( projs[pId_].uPhDateStart + (proPhases[pId_][phNext_-1].duration/2)   <  block.timestamp, "ivd start");
+        projs[pId_].uWidwable              +=   proPhases[pId_][phNext_].widwable;
+        projs[pId_].uFunded                -=   proPhases[pId_][phNext_].widwable;
+        projs[pId_].uPhDateStart           =    block.timestamp;
+        projs[pId_].uPhDateEnd             +=   proPhases[pId_][phNext_].duration;
+        projs[pId_].uPhCurrent             =    phNext_;
 
         proPhases[pId_][phNext_].phaseStart     =    block.timestamp;
     }
     function opKickoff(uint pId_) public chkOperator {
-        require(upProjects[pId_].uStatus        ==  0,  "ivd status");
-        require(upProjects[pId_].uFunded        ==  projects[pId_].nftNum * projects[pId_].nftAmt, "ivd amount");
-        upProjects[pId_].uStatus                =   1;      // progress
+        require( projs[pId_].uStatus        ==  0,  "ivd status");
+        require( projs[pId_].uFunded        ==  projs[pId_].Init.nftNum * projs[pId_].Init.nftAmt, "ivd amount");
+        projs[pId_].uStatus                =   1;      // progress
         _updateProject(pId_, 1);
-        taxes[pId_]                             +=  projects[pId_].taxKick;
-        upProjects[pId_].uFunded                -=  projects[pId_].taxKick;
-        emit EAction(pId_, "kickoff", upProjects[pId_].uCreator, upProjects[pId_].uPhDateEnd);
+        taxes[pId_]                             +=  projs[pId_].Init.taxKick;
+        projs[pId_].uFunded                -=  projs[pId_].Init.taxKick;
+        emit EAction(pId_, "kickoff", projs[pId_].Init.creator, projs[pId_].uPhDateEnd);
     }
     function opCommit(uint pId_, string memory path_) public chkOperator {
-        require(upProjects[pId_].uStatus        ==  1, "ivd status");
-        require(upProjects[pId_].uPhCurrent     <   proPhases[pId_].length, "ivd phase");
-        proPhases[pId_][upProjects[pId_].uPhCurrent].uPath   = path_;
-        if(upProjects[pId_].uPhCurrent == (proPhases[pId_].length - 2 )) upProjects[pId_].uStatus      =  2; //finish
-        _updateProject(pId_, upProjects[pId_].uPhCurrent + 1);
-        emit EAction(pId_, "commit", upProjects[pId_].uCreator, upProjects[pId_].uPhDateEnd);
+        require( projs[pId_].uStatus        ==  1, "ivd status");
+        require( projs[pId_].uPhCurrent     <   proPhases[pId_].length, "ivd phase");
+        proPhases[pId_][ projs[pId_].uPhCurrent].uPath   = path_;
+        if( projs[pId_].uPhCurrent == (proPhases[pId_].length - 2 )) projs[pId_].uStatus      =  2; //finish
+        _updateProject(pId_, projs[pId_].uPhCurrent + 1);
+        emit EAction(pId_, "commit", projs[pId_].Init.creator, projs[pId_].uPhDateEnd);
     }
     function opRelease( uint pId_, string memory path_) public chkOperator {
-        require(upProjects[pId_].uStatus      ==  2, "ivd status");   // finish
-        upProjects[pId_].uStatus              =   5;      // release
-        upProjects[pId_].uPhDateEnd           =   block.timestamp;
-        proPhases[pId_][ upProjects[pId_].uPhCurrent ].uPath      =   path_;
-        if(upProjects[pId_].uFunded > 0) {
-            upProjects[pId_].uWidwable        +=  upProjects[pId_].uFunded;
-            upProjects[pId_].uFunded          =   0;
+        require( projs[pId_].uStatus      ==  2, "ivd status");   // finish
+        projs[pId_].uStatus              =   5;      // release
+        projs[pId_].uPhDateEnd           =   block.timestamp;
+        proPhases[pId_][ projs[pId_].uPhCurrent ].uPath      =   path_;
+        if( projs[pId_].uFunded > 0) {
+            projs[pId_].uWidwable        +=  projs[pId_].uFunded;
+            projs[pId_].uFunded          =   0;
         }
-        emit EAction(pId_, "release", upProjects[pId_].uCreator, upProjects[pId_].uWidwable);
+        emit EAction(pId_, "release", projs[pId_].Init.creator, projs[pId_].uWidwable);
     }
     function opCancel( uint pId_) public chkOperator {
-        require(upProjects[pId_].uStatus      <  4, "ivd status");
-        upProjects[pId_].uStatus              =   4;      // cancel
-        upProjects[pId_].uPhDateEnd           =   block.timestamp;
-        emit EAction(pId_, "cancel", upProjects[pId_].uCreator, upProjects[pId_].uFunded);
+        require( projs[pId_].uStatus      <  4, "ivd status");
+        projs[pId_].uStatus              =   4;      // cancel
+        projs[pId_].uPhDateEnd           =   block.timestamp;
+        emit EAction(pId_, "cancel", projs[pId_].Init.creator, projs[pId_].uFunded);
     }
     function fund( uint pId_, address backer_, uint256 amount_, uint number_) public payable {
-        require(upProjects[pId_].uStatus            ==  0,          "ivd status");
-        require(projects[pId_].nftAmt * number_     ==  amount_,    "amount incorrect");
-        require(upProjects[pId_].uFunded + amount_  <=  projects[pId_].nftNum * projects[pId_].nftAmt, "ivd amount");
-        _cryptoTransferFrom(backer_, address(this), upProjects[pId_].uCrypto ,amount_);
+        require( projs[pId_].uStatus                    ==  0,          "ivd status");
+        require( projs[pId_].Init.nftAmt * number_      ==  amount_,    "amount incorrect");
+        require( projs[pId_].uFunded + amount_  <=  projs[pId_].Init.nftNum * projs[pId_].Init.nftAmt, "ivd amount");
+        _cryptoTransferFrom(backer_, address(this), projs[pId_].Init.crypto, amount_);
         logFund[pId_][backer_]                      +=  number_;
         logNum[pId_][backer_]                       +=  number_;
-        upProjects[pId_].uFunded                    +=  amount_;
-        upProjects[pId_].uNftNum                    +=  number_;
+        projs[pId_].uFunded                    +=  amount_;
+        projs[pId_].uNftNum                    +=  number_;
         taxes[pId_]                                 +=  amount_ - (proPhases[pId_][0].refundable * number_);
         emit EAction(pId_, "fund", backer_, amount_);
     }
     function opSetBack( uint pId_, uint256 nftAmtLate_, uint256 nftFeeLate_, uint256 nftLimitLate_) public chkOperator {
-        upProjects[pId_].uNftAmtBack                = nftAmtLate_;
-        upProjects[pId_].uNftFeeBack                = nftFeeLate_;
-        upProjects[pId_].uNftLimitBack              = nftLimitLate_;
+        bkProjs[pId_].uNftAmtBack                = nftAmtLate_;
+        bkProjs[pId_].uNftFeeBack                = nftFeeLate_;
+        bkProjs[pId_].uNftLimitBack              = nftLimitLate_;
     }
     function back( uint pId_, address backer_, uint256 amount_, uint number_) public payable {
-        require(upProjects[pId_].uNftLimitBack          >=  number_,    "ivd back");
-        require(upProjects[pId_].uStatus                <   2,          "ivd status");//fund or progress
-        require(upProjects[pId_].uNftAmtBack * number_  ==  amount_,    "amount incorrect");
-        require(upProjects[pId_].uFunded                >=  projects[pId_].nftNum * projects[pId_].nftAmt, "ivd amount");
-        _cryptoTransferFrom(backer_, address(this), upProjects[pId_].uCrypto ,amount_);        
-        taxes[pId_]                                 +=  upProjects[pId_].uNftFeeBack * number_;
+        require(bkProjs[pId_].uNftLimitBack            >=  number_,    "ivd back");
+        require( projs[pId_].uStatus                    <   2,          "ivd status");//fund or progress
+        require(bkProjs[pId_].uNftAmtBack * number_    ==  amount_,    "amount incorrect");
+        require( projs[pId_].uFunded                    >=  projs[pId_].Init.nftNum * projs[pId_].Init.nftAmt, "ivd amount");
+        _cryptoTransferFrom(backer_, address(this), projs[pId_].Init.crypto ,amount_);        
+        taxes[pId_]                                 +=  bkProjs[pId_].uNftFeeBack * number_;
         logNum[pId_][backer_]                       +=  number_;
-        upProjects[pId_].uFunded                    +=  amount_ - (upProjects[pId_].uNftFeeBack * number_);
-        upProjects[pId_].uNftNum                    +=  number_;
-        upProjects[pId_].uNftLimitBack              -=  number_;
+        projs[pId_].uFunded                    +=  amount_ - (bkProjs[pId_].uNftFeeBack * number_);
+        projs[pId_].uNftNum                    +=  number_;
+        bkProjs[pId_].uNftLimitBack              -=  number_;
         emit EAction(pId_, "back", backer_, amount_);
     }
     function deny(uint pId_, uint phNo_) public {
-        require(upProjects[pId_].uStatus            ==  1 || upProjects[pId_].uStatus      ==  2,   "ivd status");
+        require( projs[pId_].uStatus            ==  1 || projs[pId_].uStatus      ==  2,   "ivd status");
         require(logFund[pId_][msg.sender]           >  0,   "ivd backer");
-        require(logDenied[msg.sender][pId_]         <   upProjects[pId_].uPhCurrent,  "ivd denied");
-        logDenied[msg.sender][pId_]                 =   upProjects[pId_].uPhCurrent;
+        require(logDenied[msg.sender][pId_]         <   projs[pId_].uPhCurrent,  "ivd denied");
+        logDenied[msg.sender][pId_]                 =   projs[pId_].uPhCurrent;
         logDeniedNo[pId_][phNo_]                    +=  logFund[pId_][msg.sender];
-        if(logDeniedNo[pId_][phNo_]                 >=  projects[pId_].nftDeniedMax)    upProjects[pId_].uStatus          =   3;  //pendding
-        emit EAction(pId_, "deny", msg.sender, (upProjects[pId_].uFunded/projects[pId_].nftNum));
+        if(logDeniedNo[pId_][phNo_]                 >=  projs[pId_].Init.nftDeniedMax)    projs[pId_].uStatus          =   3;  //pendding
+        emit EAction(pId_, "deny", msg.sender, ( projs[pId_].uFunded/ projs[pId_].Init.nftNum));
     }
     function refund( uint pId_) public {
-        require(upProjects[pId_].uStatus            ==  4,   "ivd status");
+        require( projs[pId_].uStatus            ==  4,   "ivd status");
         require(logNum[pId_][msg.sender]            >   0,   "ivd backer");
         require(logRefund[pId_][msg.sender]         <   1,   "ivd refund");
-        require(upProjects[pId_].uFunded            >   0,   "ivd amount");
-        logRefund[pId_][msg.sender]                 =   proPhases[pId_][ upProjects[pId_].uPhCurrent ].refundable * logNum[pId_][msg.sender];
-        upProjects[pId_].uFunded                    -=  proPhases[pId_][ upProjects[pId_].uPhCurrent ].refundable * logNum[pId_][msg.sender];        
-        _cryptoTransfer(msg.sender,  upProjects[pId_].uCrypto, logRefund[pId_][msg.sender]);
-        emit EAction(pId_, "refund", msg.sender, (upProjects[pId_].uFunded/projects[pId_].nftNum)*logNum[pId_][msg.sender]);
+        require( projs[pId_].uFunded            >   0,   "ivd amount");
+        logRefund[pId_][msg.sender]                 =   proPhases[pId_][ projs[pId_].uPhCurrent ].refundable * logNum[pId_][msg.sender];
+        projs[pId_].uFunded                    -=  proPhases[pId_][ projs[pId_].uPhCurrent ].refundable * logNum[pId_][msg.sender];        
+        _cryptoTransfer(msg.sender,  projs[pId_].Init.crypto, logRefund[pId_][msg.sender]);
+        emit EAction(pId_, "refund", msg.sender, ( projs[pId_].uFunded/ projs[pId_].Init.nftNum)*logNum[pId_][msg.sender]);
     }
     function withdraw( uint pId_) public {
-        require(upProjects[pId_].uCreator           ==  msg.sender,    "ivd creator");
-        require(upProjects[pId_].uWidwable          >   0,             "ivd amount");
-        logWithdraw[pId_][block.timestamp]          =   upProjects[pId_].uWidwable;
-        upProjects[pId_].uWidwable                  =   0;
-        _cryptoTransfer(msg.sender,  upProjects[pId_].uCrypto, logWithdraw[pId_][block.timestamp]);
+        require( projs[pId_].Init.creator           ==  msg.sender,    "ivd creator");
+        require( projs[pId_].uWidwable          >   0,             "ivd amount");
+        logWithdraw[pId_][block.timestamp]          =   projs[pId_].uWidwable;
+        projs[pId_].uWidwable                  =   0;
+        _cryptoTransfer(msg.sender,  projs[pId_].Init.crypto, logWithdraw[pId_][block.timestamp]);
         emit EAction(pId_, "withdraw", msg.sender, logWithdraw[pId_][block.timestamp]);
     }
-    function owGetTax(uint pId_) public {
-        require( _owner     ==  msg.sender, "only for owner");
+    function owGetTax(uint pId_) public chkOwnerLock {
         uint256 vTax    = taxes[pId_];
         taxes[pId_]     = 0;
-        _cryptoTransfer(msg.sender,  upProjects[pId_].uCrypto, vTax);
+        _cryptoTransfer(msg.sender,  projs[pId_].Init.crypto, vTax);
     }
-    function owCloseProject( uint pId_) public {
-        require( _owner     ==  msg.sender, "only for owner");
-        uint256 vBalance    =   upProjects[pId_].uWidwable + upProjects[pId_].uFunded + taxes[pId_];
-        upProjects[pId_].uWidwable      =   0; 
-        upProjects[pId_].uFunded        =   0;
+    function owCloseProject( uint pId_) public chkOwnerLock {
+        uint256 vBalance    =   projs[pId_].uWidwable + projs[pId_].uFunded + taxes[pId_];
+        projs[pId_].uWidwable      =   0; 
+        projs[pId_].uFunded        =   0;
         taxes[pId_]                     =   0;
-        upProjects[pId_].uStatus        =   4;  // cancel
-        _cryptoTransfer(msg.sender,  upProjects[pId_].uCrypto, vBalance);
+        projs[pId_].uStatus        =   4;  // cancel
+        _cryptoTransfer(msg.sender,  projs[pId_].Init.crypto, vBalance);
     }
-    function owCloseAll(address crypto_, uint256 value_) public {
-        require( _owner     ==  msg.sender, "only for owner");
+    function owCloseAll(address crypto_, uint256 value_) public chkOwnerLock {
         _cryptoTransfer(msg.sender,  crypto_, value_);
     } 
     function _cryptoTransferFrom(address from_, address to_, address crypto_, uint256 amount_) internal returns (uint256) {
