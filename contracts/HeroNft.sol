@@ -5,11 +5,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 
 contract Hero721 is ERC721 {
-    
-    using Address for address;
     using Strings for uint256;
-    using Counters for Counters.Counter;
-    Counters.Counter private _tokenIds;
     
     struct Project {
         uint    fundId;
@@ -26,6 +22,8 @@ contract Hero721 is ERC721 {
         uint    proId;
         uint    index;
     }
+
+    uint256                         public  tokenIdCurrent;
     Project[]                       public  projects;
     mapping(uint    =>  uint[])     public  fundOwns;       //  funding project have ERC721 project
     Info[]                          public  infos;          //  token belong
@@ -34,6 +32,9 @@ contract Hero721 is ERC721 {
     mapping(address =>  bool)       private _operators;
     address                         private _owner;
     bool                            private _ownerLock = true;
+
+    event CreateProject(uint indexed fundId, uint indexed projectId, string URI);
+    event MintProject(uint indexed projectId, uint indexed ind, uint256 tokenId,address[] backers);
 
     constructor(string memory name_, string memory symbol_,  address[] memory operators_ ) ERC721 (name_, symbol_) {
         _owner       = payable(msg.sender);
@@ -55,24 +56,21 @@ contract Hero721 is ERC721 {
     function opSetOwnerLock(bool val_) public chkOperator {
         _ownerLock   = val_;
     }
-    /** each token */
-    function getTokenId() public view returns (uint256) { 
-        return _tokenIds.current();
-    }
-    function tokenURI(uint256 id_) public view virtual override returns (string memory) {
-        require(_exists(id), "ERC721Metadata: URI query for nonexistent token");
-        if(_URLs[id_].length > 0)   return URLs[id_];
-        string memory   baseURI = projects[info[id].proId].URI;
-        uint            tokenId = info[id].index;
-        return bytes(baseURI).length > 0 ? string(abi.encodePacked(baseURI, tokenId.toString())) : "";
-    }
     function opUpdateTokenUrl(uint256 tokenId_, string memory url_) public chkOperator { 
-        _URLs[tokenId_]    = url_;
+        URLs[tokenId_]    = url_;
     }
-    function owUpdateProject(uint pId_, uint256 price_, uint256 fee_, string memory URI_) external chkOperator {
+    function opUpdateProject(uint pId_, uint256 price_, uint256 fee_, string memory URI_) external chkOperator {
         projects[pId_].price      = price_;
         projects[pId_].fee        = fee_;
         projects[pId_].URI        = URI_;
+    }
+    /** token */
+    function tokenURI(uint256 id_) public view virtual override returns (string memory) {
+        require(_exists(id_), "ERC721Metadata: URI query for nonexistent token");
+        if(bytes(URLs[id_]).length > 0)   return URLs[id_];
+        string memory   baseURI = projects[infos[id_].proId].URI;
+        uint            tokenId = infos[id_].index;
+        return bytes(baseURI).length > 0 ? string(abi.encodePacked(baseURI, tokenId.toString())) : "";
     } 
     function burn( uint256 id) external {
         _burn(id);
@@ -89,24 +87,26 @@ contract Hero721 is ERC721 {
         vPro.uLimit          = limit_;
         projects.push(vPro);
         fundOwns[fundId_].push(projects.length -1);
+        emit CreateProject(fundId_, projects.length -1, URI_);
     }
     function opMintProject(uint pId_, address[] memory tos_, uint256 index_, uint256 amount_) external payable chkOperator {
-        require( tos_.length <= projects[pId_].limit, "invalid token number");
+        require( tos_.length <= projects[pId_].uLimit, "invalid token number");
         require( amount_  == projects[pId_].price * tos_.length,  "Amount sent is not correct");
-        _cryptoTransferFrom(msg.sender, address(this), amount_);
+        _cryptoTransferFrom(msg.sender, address(this), projects[pId_].crypto, amount_);
        
         for(uint256 vI = 0; vI < tos_.length; vI++) {
-            _tokenIds.increment();
-            _mint(tos_[vI], _tokenIds.current());
+            _mint(tos_[vI], tokenIdCurrent);
+            tokenIdCurrent++;
             Info memory vInfo;
             vInfo.proId     =   pId_;
             vInfo.index     =   index_ + vI;
             infos.push(vInfo);
         }
         projects[pId_].uLimit  -= tos_.length;
-        uint256 vFee                = amount_ - (projects[projectId_].fee * tos_.length);
+        uint256 vFee           =  projects[pId_].fee * tos_.length;
         projects[pId_].uTax    += vFee;
         projects[pId_].uIncome += amount_ - vFee;
+        emit MintProject(pId_, index_, tokenIdCurrent-1, tos_);
     }
 
 /** payment */    
