@@ -125,7 +125,8 @@ contract FundRaise {
         projs[pId_].uFunded                 -=  projs[pId_].Init.taxKick;
         emit EAction(pId_, "kickoff", pId_, "kickoff", projs[pId_].Init.creator, projs[pId_].uPhDateEnd);
     }
-    function opCommit(uint pId_, string memory path_) public chkOperator {
+    function commit(uint pId_, string memory path_) public {
+        require( projs[pId_].Init.creator   ==  msg.sender || _operators[msg.sender] == true,    "ivd exetor");
         require( projs[pId_].uStatus        ==  1, "ivd status");
         require( projs[pId_].uPhCurrent     <   proPhases[pId_].length, "ivd phase");
         proPhases[pId_][ projs[pId_].uPhCurrent].uPath   = path_;
